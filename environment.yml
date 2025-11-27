@@ -1,0 +1,21 @@
+name: slats
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - gdal
+  - rios
+  - rasterio
+  - numpy
+  - scipy
+  - pandas
+  - boto3
+  - botocore=1.40.61
+  - s3fs
+  - python-dotenv
+  - requests
+  - pip
+  - pip:
+    - pystac-client
+    - tifffile
