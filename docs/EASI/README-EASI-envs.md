@@ -68,7 +68,7 @@ python -m venv ~/venvs/$MYENV
 realpath /env/lib/$PYVERSION/site-packages > ~/venvs/$MYENV/lib/$PYVERSION/site-packages/base_venv.pth
 
 This creates ~/venvs/eds-env and lets it “see” the base EASI packages.
-
+```
 ## 2.2 Activate the environment and install extra packages
 
 Still in the same Terminal:
@@ -97,9 +97,9 @@ You now have a new environment and a Jupyter kernel called EASI: eds-env.
 
 In a notebook:
 
-Go to Kernel → Change Kernel…
+ - Go to Kernel → Change Kernel…
 
-Select EASI: eds-env (or whatever display name you used).
+ - Select EASI: eds-env (or whatever display name you used).
 
 From now on, imports and packages you installed into eds-env will work in that notebook.
 
@@ -143,9 +143,9 @@ python -m ipykernel install --user --name=eds-local --display-name "Local: eds-l
 
 Now you can:
 
-In a local Jupyter notebook: choose “Local: eds-local” as the kernel.
+ - In a local Jupyter notebook: choose “Local: eds-local” as the kernel.
 
-In VS Code: select the eds-local conda interpreter.
+ - In VS Code: select the eds-local conda interpreter.
 
 ## 3.2 Export conda env → requirements.txt for EASI
 
@@ -214,52 +214,52 @@ python -m ipykernel install --user --name=project-venv --display-name "Local: pr
 
 Then in Jupyter (or VS Code’s notebook UI), select the kernel you created.
 
-5. VS Code integration summary
-5.1 Local VS Code
+# 5. VS Code integration summary
+## 5.1 Local VS Code
 
 For Python scripts and terminals:
 
-Press Ctrl+Shift+P → Python: Select Interpreter.
+1. Press Ctrl+Shift+P → Python: Select Interpreter.
 
-Choose:
+2. Choose:
 
-Conda: eds-local (your conda env), or
+  - Conda: eds-local (your conda env), or
 
-Python 3.x ('.venv': venv) for a local venv.
+  - Python 3.x ('.venv': venv) for a local venv.
 
 VS Code will:
 
-Use that interpreter for the integrated terminal.
+ - Use that interpreter for the integrated terminal.
 
-Use that interpreter when running or debugging Python files.
+ - Use that interpreter when running or debugging Python files.
 
 For notebooks:
 
-Use the kernel picker in the top-right of the notebook editor.
+ - Use the kernel picker in the top-right of the notebook editor.
 
-Choose the matching kernel name (e.g. Local: eds-local or Local: project-venv).
+ - Choose the matching kernel name (e.g. Local: eds-local or Local: project-venv).
 
 ## 5.2 VS Code + Remote EASI (if you ever use SSH Remote)
 
 If you connect to the EASI Jupyter host via VS Code Remote SSH:
 
-VS Code runs on the remote host, so:
+- VS Code runs on the remote host, so:
 
-It will see venvs under ~/venvs.
+  - It will see venvs under ~/venvs.
 
-You can select ~/venvs/eds-env/bin/python as the interpreter.
+  - You can select ~/venvs/eds-env/bin/python as the interpreter.
 
-For notebooks, it will also list Jupyter kernels you created via ipykernel install.
+ - For notebooks, it will also list Jupyter kernels you created via ipykernel install.
 
 Workflow:
 
-Connect to EASI with Remote SSH in VS Code.
+ 1. Connect to EASI with Remote SSH in VS Code.
 
-Open the project folder.
+ 2. Open the project folder.
 
-Select interpreter: ~/venvs/eds-env/bin/python.
+ 3. Select interpreter: ~/venvs/eds-env/bin/python.
 
-For notebooks, choose kernel: “EASI: eds-env”.
+ 4.  For notebooks, choose kernel: “EASI: eds-env”.
 
 ---------------------------
 # 6. Managing and cleaning up environments
