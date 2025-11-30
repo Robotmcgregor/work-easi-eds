@@ -327,3 +327,5 @@ This README is designed so you can:
 ::contentReference[oaicite:0]{index=0}
 
 ```
+
+source ~/venvs/eds-slats/bin/activate
