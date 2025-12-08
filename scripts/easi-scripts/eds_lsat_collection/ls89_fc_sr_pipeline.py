@@ -30,17 +30,17 @@ DEFAULT_TILE_REL = "assets/eds_lsat_grid_min_max.shp"
 DEFAULT_TILE_SHP = HOME / "scratch" / "eds" / DEFAULT_TILE_REL
 
 DEFAULT_QUERY_SCRIPT = (
-    HOME / "work-easi-eds" / "scripts" / "easi-scripts" / "ls89_fc_sr_query.py"
+    HOME / "work-easi-eds" / "scripts" / "easi-scripts" / "eds_lsat_collection" / "ls89_fc_sr_query.py"
 )
 
 # Season filter script (from previous step)
 DEFAULT_SEASON_SCRIPT = (
-    HOME / "work-easi-eds" / "scripts" / "easi-scripts" / "ls89_season_filter.py"
+    HOME / "work-easi-eds" / "scripts" / "easi-scripts" / "eds_lsat_collection" / "ls89_season_filter.py"
 )
 
 # 🔹 NEW: download script (from comparison table)
 DEFAULT_DOWNLOAD_SCRIPT = (
-    HOME / "work-easi-eds" / "scripts" / "easi-scripts" / "ls89_download_fc_sr_from_comparison.py"
+    HOME / "work-easi-eds" / "scripts" / "easi-scripts" / "eds_lsat_collection" / "ls89_download_fc_sr_from_comparison.py"
 )
 
 
