@@ -2,6 +2,7 @@
 Minimal shim for QLD qvf helpers used by edsadhoc_timeserieschange_d.py.
 Provides filename parsing/assembly compatible enough for the script to run.
 """
+
 from __future__ import annotations
 
 import os
@@ -63,7 +64,9 @@ def changestage(filename: str, newstage: str) -> str:
     """Replace the stage code part (e.g., _db8mz) with newstage + 'mz'."""
     base = _basename(filename)
     # Use subn to detect whether a replacement occurred
-    out, n = re.subn(r"_(d[a-z0-9]{2})mz\.img$", f"_{newstage}mz.img", base, flags=re.IGNORECASE)
+    out, n = re.subn(
+        r"_(d[a-z0-9]{2})mz\.img$", f"_{newstage}mz.img", base, flags=re.IGNORECASE
+    )
     if n == 0:
         # Pattern not found; append stage suffix once
         base2 = base if base.lower().endswith(".img") else base + ".img"

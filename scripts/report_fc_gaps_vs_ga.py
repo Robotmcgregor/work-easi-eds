@@ -32,6 +32,7 @@ from typing import List, Optional, Dict, Set, Tuple, Any
 import re
 
 import sys
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -42,13 +43,16 @@ import os
 import re
 
 RE_DATE_IN_NAME = re.compile(r"_(\d{8})(?:_|\.|$)")
-RE_FC_LOCAL = re.compile(r"^ga_ls_fc_(?P<pr>\d{6})_(?P<ymd>\d{8})_fc3ms(?:_clr)?\.tif$", re.IGNORECASE)
+RE_FC_LOCAL = re.compile(
+    r"^ga_ls_fc_(?P<pr>\d{6})_(?P<ymd>\d{8})_fc3ms(?:_clr)?\.tif$", re.IGNORECASE
+)
 
 # Optional .env loader so flags with defaults from env pick up values without manual export
 try:
     from dotenv import load_dotenv  # type: ignore
 except Exception:
     load_dotenv = None  # type: ignore[assignment]
+
 
 def _load_env_if_present() -> None:
     """Load environment variables from a nearby .env file if python-dotenv is available.
@@ -77,7 +81,7 @@ def _season_months(start_mm: int, end_mm: int) -> List[int]:
 
 def _candidate_prefixes(tile: str, base_prefix: Optional[str]) -> List[str]:
     tile = tile.strip()
-    if '_' not in tile and len(tile) == 6 and tile.isdigit():
+    if "_" not in tile and len(tile) == 6 and tile.isdigit():
         tile_pp_rr = f"{tile[:3]}_{tile[3:]}"
     else:
         tile_pp_rr = tile
@@ -145,7 +149,9 @@ def _stac_search_fc(bbox: str, start_date: str, end_date: str) -> Dict:
         with urllib.request.urlopen(req, timeout=60) as url:
             return json.loads(url.read().decode())
     except Exception as e:
-        raise RuntimeError(f"DEA STAC request failed (GET and POST). Check bbox/time. Underlying error: {e}")
+        raise RuntimeError(
+            f"DEA STAC request failed (GET and POST). Check bbox/time. Underlying error: {e}"
+        )
 
 
 def _ym_from_iso(iso_date: str) -> Tuple[str, str]:
@@ -167,10 +173,15 @@ def main(argv=None) -> int:
     ap.add_argument("--csv", required=True, help="Output CSV path")
 
     # Optional: compare GA vs local instead of S3
-    ap.add_argument("--local-root", help="Local root folder (e.g., D:\\data\\lsat). If provided, S3 is not used.")
+    ap.add_argument(
+        "--local-root",
+        help="Local root folder (e.g., D:\\data\\lsat). If provided, S3 is not used.",
+    )
 
     ap.add_argument("--bucket", default=os.getenv("S3_BUCKET", ""))
-    ap.add_argument("--region", default=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "")))
+    ap.add_argument(
+        "--region", default=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", ""))
+    )
     ap.add_argument("--profile", default=os.getenv("AWS_PROFILE", ""))
     ap.add_argument("--endpoint", default=os.getenv("S3_ENDPOINT_URL", ""))
     ap.add_argument("--role-arn", dest="role_arn", default=os.getenv("S3_ROLE_ARN", ""))
@@ -180,14 +191,15 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     # Compute seasonal months and years
-    s_mon = int(args.start_yyyymm[4:]); e_mon = int(args.end_yyyymm[4:])
+    s_mon = int(args.start_yyyymm[4:])
+    e_mon = int(args.end_yyyymm[4:])
     months = _season_months(s_mon, e_mon)
     e_year = int(args.end_yyyymm[:4])
     years = list(range(e_year - (args.span_years - 1), e_year + 1))
 
     # Date span for STAC query (full span; we'll filter months)
     start_date = f"{years[0]}-01-01"  # safe envelope
-    end_date   = f"{years[-1]}-12-31"
+    end_date = f"{years[-1]}-12-31"
 
     # STAC query
     data_fc = _stac_search_fc(args.bbox, start_date, end_date)
@@ -203,13 +215,15 @@ def main(argv=None) -> int:
         yyyy, yyyymm = _ym_from_iso(iso)
         mm = int(yyyymm[4:])
         if mm in months and int(yyyy) in years:
-            ymd = iso.replace('-', '')
+            ymd = iso.replace("-", "")
             ga_dates.add(ymd)
 
     # Dates present locally or in S3
     if args.local_root:
         # Scan local
-        want_tile = args.tile if '_' in args.tile else f"{args.tile[:3]}_{args.tile[3:]}"
+        want_tile = (
+            args.tile if "_" in args.tile else f"{args.tile[:3]}_{args.tile[3:]}"
+        )
         local_dates: Set[str] = set()
         for dirpath, dirnames, filenames in os.walk(args.local_root):
             # Restrict to this tile's top-level folder when possible
@@ -232,9 +246,16 @@ def main(argv=None) -> int:
             try:
                 from src.utils.s3_client import S3Client
             except Exception as e:
-                raise RuntimeError("S3 comparison requested but failed to import S3 client. Ensure project deps installed.") from e
-            s3 = S3Client(bucket=args.bucket, region=args.region or "", profile=args.profile or "",
-                          endpoint_url=args.endpoint or "", role_arn=args.role_arn or "")
+                raise RuntimeError(
+                    "S3 comparison requested but failed to import S3 client. Ensure project deps installed."
+                ) from e
+            s3 = S3Client(
+                bucket=args.bucket,
+                region=args.region or "",
+                profile=args.profile or "",
+                endpoint_url=args.endpoint or "",
+                role_arn=args.role_arn or "",
+            )
             prefixes = _candidate_prefixes(args.tile, base_prefix)
             s_dates = _s3_fc_dates(s3, prefixes)
 
@@ -250,25 +271,32 @@ def main(argv=None) -> int:
             status = "MISSING_IN_S3"
         else:
             status = "ONLY_IN_S3"
-        out_rows.append({
-            "tile": args.tile,
-            "date": d,
-            "year": d[:4],
-            "yearmonth": d[:6],
-            "status": status,
-        })
+        out_rows.append(
+            {
+                "tile": args.tile,
+                "date": d,
+                "year": d[:4],
+                "yearmonth": d[:6],
+                "status": status,
+            }
+        )
 
     # Write CSV
     out = Path(args.csv)
     out.parent.mkdir(parents=True, exist_ok=True)
     import csv
+
     with out.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["tile", "date", "year", "yearmonth", "status"])
+        w = csv.DictWriter(
+            f, fieldnames=["tile", "date", "year", "yearmonth", "status"]
+        )
         w.writeheader()
         for r in out_rows:
             w.writerow(r)
     print(f"Wrote gap report: {out}")
-    print(f"Summary: total={len(out_rows)} missing_in_s3={sum(1 for r in out_rows if r['status']=='MISSING_IN_S3')}")
+    print(
+        f"Summary: total={len(out_rows)} missing_in_s3={sum(1 for r in out_rows if r['status']=='MISSING_IN_S3')}"
+    )
     return 0
 
 

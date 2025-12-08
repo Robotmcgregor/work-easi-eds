@@ -57,12 +57,14 @@ from osgeo import gdal
 try:
     from rsc.utils.metadb import stdProjFilename
 except Exception:
+
     def stdProjFilename(name: str) -> str:
         return name
 
 
 def parse_date(path: str) -> str:
     import re
+
     m = re.search(r"(19|20)\d{6}", os.path.basename(path))
     if not m:
         raise ValueError(f"Cannot parse date from {path}")
@@ -71,7 +73,10 @@ def parse_date(path: str) -> str:
 
 def decimal_year(yyyymmdd: str) -> float:
     import datetime
-    y = int(yyyymmdd[:4]); m = int(yyyymmdd[4:6]); d = int(yyyymmdd[6:])
+
+    y = int(yyyymmdd[:4])
+    m = int(yyyymmdd[4:6])
+    d = int(yyyymmdd[6:])
     date = datetime.date(y, m, d)
     jan1 = datetime.date(y, 1, 1)
     dec31 = datetime.date(y, 12, 31)
@@ -87,7 +92,8 @@ def _parse_mmdd(mmdd: str) -> Tuple[int, int]:
 
 
 def in_window(yyyymmdd: str, start_mmdd: str, end_mmdd: str) -> bool:
-    m = int(yyyymmdd[4:6]); d = int(yyyymmdd[6:8])
+    m = int(yyyymmdd[4:6])
+    d = int(yyyymmdd[6:8])
     sm, sd = _parse_mmdd(start_mmdd)
     em, ed = _parse_mmdd(end_mmdd)
     if (sm, sd) <= (em, ed):
@@ -100,14 +106,20 @@ def load_raster(path: str) -> Tuple[np.ndarray, Tuple]:
     ds = gdal.Open(path, gdal.GA_ReadOnly)
     if ds is None:
         raise IOError(f"Cannot open {path}")
-    bands = [ds.GetRasterBand(i+1).ReadAsArray() for i in range(ds.RasterCount)]
+    bands = [ds.GetRasterBand(i + 1).ReadAsArray() for i in range(ds.RasterCount)]
     arr = np.stack(bands, axis=0)
     georef = (ds.GetGeoTransform(can_return_null=True), ds.GetProjection())
     ds = None
     return arr, georef
 
 
-def write_envi(out_path: str, arrays: List[np.ndarray], georef: Tuple, dtype=gdal.GDT_Byte, nodata=0) -> None:
+def write_envi(
+    out_path: str,
+    arrays: List[np.ndarray],
+    georef: Tuple,
+    dtype=gdal.GDT_Byte,
+    nodata=0,
+) -> None:
     gt, proj = georef
     ysize, xsize = arrays[0].shape
     drv = gdal.GetDriverByName("ENVI")
@@ -144,7 +156,9 @@ def normalise_fpc(arr: np.ndarray) -> np.ndarray:
     return norm
 
 
-def timeseries_stats(norm_list: List[np.ndarray], date_list: List[str]) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def timeseries_stats(
+    norm_list: List[np.ndarray], date_list: List[str]
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute baseline statistics across normalized FPC stack.
 
     Returns per-pixel arrays for:
@@ -166,7 +180,9 @@ def timeseries_stats(norm_list: List[np.ndarray], date_list: List[str]) -> Tuple
             intercept = mean.copy()
         else:
             y_mean = mean
-            slope = np.sum(((t - t_mean)[:, None, None]) * (stack - y_mean), axis=0) / denom
+            slope = (
+                np.sum(((t - t_mean)[:, None, None]) * (stack - y_mean), axis=0) / denom
+            )
             intercept = y_mean - slope * t_mean
     else:
         slope = np.zeros_like(mean)
@@ -174,12 +190,22 @@ def timeseries_stats(norm_list: List[np.ndarray], date_list: List[str]) -> Tuple
     return mean, std, stderr, slope, intercept
 
 
-def stretch(img: np.ndarray, mean: float, stddev: float, numStdDev: float, minVal: int, maxVal: int, ignoreVal: float) -> np.ndarray:
+def stretch(
+    img: np.ndarray,
+    mean: float,
+    stddev: float,
+    numStdDev: float,
+    minVal: int,
+    maxVal: int,
+    ignoreVal: float,
+) -> np.ndarray:
     """Legacy-style linear stretch to uint8 given mean/std and a +-numStdDev window.
 
     Pixels equal to ignoreVal (e.g., 0) are forced to 0 in the output.
     """
-    stretched = minVal + (img - mean + stddev * numStdDev) * (maxVal - minVal) / (stddev * 2 * numStdDev)
+    stretched = minVal + (img - mean + stddev * numStdDev) * (maxVal - minVal) / (
+        stddev * 2 * numStdDev
+    )
     stretched = np.clip(stretched, minVal, maxVal)
     stretched = stretched.astype(np.float32)
     stretched[img == ignoreVal] = 0
@@ -187,18 +213,20 @@ def stretch(img: np.ndarray, mean: float, stddev: float, numStdDev: float, minVa
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Legacy-method change detection (seasonal window)")
-    ap.add_argument('--scene', required=True)
-    ap.add_argument('--start-date', required=True)
-    ap.add_argument('--end-date', required=True)
-    ap.add_argument('--dc4-glob', help='Glob for dc4 images; defaults to compat path')
-    ap.add_argument('--start-db8')
-    ap.add_argument('--end-db8')
-    ap.add_argument('--window-start')
-    ap.add_argument('--window-end')
-    ap.add_argument('--lookback', type=int, default=10)
-    ap.add_argument('--omit-fpc-start-threshold', action='store_true')
-    ap.add_argument('--verbose', action='store_true')
+    ap = argparse.ArgumentParser(
+        description="Legacy-method change detection (seasonal window)"
+    )
+    ap.add_argument("--scene", required=True)
+    ap.add_argument("--start-date", required=True)
+    ap.add_argument("--end-date", required=True)
+    ap.add_argument("--dc4-glob", help="Glob for dc4 images; defaults to compat path")
+    ap.add_argument("--start-db8")
+    ap.add_argument("--end-db8")
+    ap.add_argument("--window-start")
+    ap.add_argument("--window-end")
+    ap.add_argument("--lookback", type=int, default=10)
+    ap.add_argument("--omit-fpc-start-threshold", action="store_true")
+    ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
 
     scene = args.scene.lower()
@@ -216,7 +244,9 @@ def main(argv=None) -> int:
         start_db8 = stdProjFilename(f"lztmre_{scene}_{sd}_db8mz.img")
         end_db8 = stdProjFilename(f"lztmre_{scene}_{ed}_db8mz.img")
     if not os.path.exists(start_db8) or not os.path.exists(end_db8):
-        raise SystemExit("Start/end db8 files not found; provide --start-db8/--end-db8 or build them.")
+        raise SystemExit(
+            "Start/end db8 files not found; provide --start-db8/--end-db8 or build them."
+        )
 
     # dc4 sources: prefer explicit glob passed by the master; otherwise use scene-based directory.
     if args.dc4_glob:
@@ -242,18 +272,23 @@ def main(argv=None) -> int:
         raw_dc4.append(arr[0])
         dates.append(parse_date(p))
     # Determine minimal common shape across start/end reflectance and all dc4 rasters
-    ys = []; xs = []
+    ys = []
+    xs = []
     for a in [ref_start, ref_end] + raw_dc4:
         if a.ndim == 3:
             _, y, x = a.shape
         else:
             y, x = a.shape
-        ys.append(y); xs.append(x)
-    min_y = min(ys); min_x = min(xs)
+        ys.append(y)
+        xs.append(x)
+    min_y = min(ys)
+    min_x = min(xs)
+
     def crop(a):
         if a.ndim == 3:
             return a[..., :min_y, :min_x]
         return a[:min_y, :min_x]
+
     ref_start = crop(ref_start).astype(np.float32)
     ref_end = crop(ref_end).astype(np.float32)
     raw_dc4 = [crop(a) for a in raw_dc4]
@@ -275,8 +310,10 @@ def main(argv=None) -> int:
         by_year.setdefault(y, []).append((d, a))
     # choose nearest to end MMDD within window
     tm, td = int(we[:2]), int(we[2:])
+
     def md_dist(d: str) -> int:
         return abs((int(d[4:6]) - tm) * 31 + (int(d[6:8]) - td))
+
     base_dates: List[str] = []
     base_raw: List[np.ndarray] = []
     for y in sorted(by_year.keys()):
@@ -288,13 +325,19 @@ def main(argv=None) -> int:
     if len(base_dates) < 2:
         # Fallback: use all available dc4 prior to start within the window (not limited to 1 per year)
         base_dates = [d for d in dates if (d <= start_cutoff and in_window(d, ws, we))]
-        base_raw = [a for d, a in zip(dates, raw_dc4) if (d <= start_cutoff and in_window(d, ws, we))]
+        base_raw = [
+            a
+            for d, a in zip(dates, raw_dc4)
+            if (d <= start_cutoff and in_window(d, ws, we))
+        ]
         if len(base_dates) < 2:
             raise SystemExit("Baseline too small (<2 images) after seasonal filtering")
 
     # Normalise baseline
     base_norm = [normalise_fpc(a) for a in base_raw]
-    ts_mean, ts_std, ts_stderr, ts_slope, ts_intercept = timeseries_stats(base_norm, base_dates)
+    ts_mean, ts_std, ts_stderr, ts_slope, ts_intercept = timeseries_stats(
+        base_norm, base_dates
+    )
 
     # Choose FPC start/end closest to provided dates (constrained to seasonal window).
     # If exact dates are present they are used; otherwise nearest-in-days inside the window.
@@ -306,12 +349,15 @@ def main(argv=None) -> int:
             if not in_window(d, ws, we):
                 continue
             import datetime
+
             def to_date(s):
                 return datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+
             dist = abs((to_date(d) - to_date(target)).days)
             if best is None or dist < best[0]:
                 best = (dist, i)
         return best[1] if best else 0
+
     idx_start = nearest_idx(sd, dates)
     idx_end = nearest_idx(ed, dates)
     fpc_start_raw = raw_dc4[idx_start]
@@ -330,28 +376,34 @@ def main(argv=None) -> int:
     tTest = np.zeros_like(observedNormedFpc, dtype=np.float32)
     valid_stderr = ts_stderr >= 0.2
     valid_std = ts_std >= 0.2
-    sTest[valid_stderr] = (observedNormedFpc[valid_stderr] - predictedNormedFpc[valid_stderr]) / ts_stderr[valid_stderr]
-    tTest[valid_std] = (observedNormedFpc[valid_std] - ts_mean[valid_std]) / ts_std[valid_std]
+    sTest[valid_stderr] = (
+        observedNormedFpc[valid_stderr] - predictedNormedFpc[valid_stderr]
+    ) / ts_stderr[valid_stderr]
+    tTest[valid_std] = (observedNormedFpc[valid_std] - ts_mean[valid_std]) / ts_std[
+        valid_std
+    ]
 
     # Spectral index from start/end DB8: bands 2,3,5,6 are indices [1,2,4,5] in the db8 stack.
     # The weights and log1p() transform follow the legacy model.
     refStart = ref_start
     refEnd = ref_end
     spectralIndex = (
-        (0.77801094 * np.log1p(refStart[1])) +
-        (1.7713253  * np.log1p(refStart[2])) +
-        (2.0714311  * np.log1p(refStart[4])) +
-        (2.5403550  * np.log1p(refStart[5])) +
-        (-0.2996241 * np.log1p(refEnd[1])) +
-        (-0.5447928 * np.log1p(refEnd[2])) +
-        (-2.2842536 * np.log1p(refEnd[4])) +
-        (-4.0177752 * np.log1p(refEnd[5]))
+        (0.77801094 * np.log1p(refStart[1]))
+        + (1.7713253 * np.log1p(refStart[2]))
+        + (2.0714311 * np.log1p(refStart[4]))
+        + (2.5403550 * np.log1p(refStart[5]))
+        + (-0.2996241 * np.log1p(refEnd[1]))
+        + (-0.5447928 * np.log1p(refEnd[2]))
+        + (-2.2842536 * np.log1p(refEnd[4]))
+        + (-4.0177752 * np.log1p(refEnd[5]))
     ).astype(np.float32)
 
-    combinedIndex = (-11.972499 * spectralIndex -
-                     0.40357223 * fpcDiff -
-                     5.2609715  * tTest -
-                     4.3794265  * sTest).astype(np.float32)
+    combinedIndex = (
+        -11.972499 * spectralIndex
+        - 0.40357223 * fpcDiff
+        - 5.2609715 * tTest
+        - 4.3794265 * sTest
+    ).astype(np.float32)
 
     # Change class assignment according to legacy thresholds.
     # 10 = no clearing (default), 3 = FPC-only signal, 34..39 = increasing clearing confidence/strength.
@@ -359,11 +411,21 @@ def main(argv=None) -> int:
     NULL_CLEARING = 0
     changeclass = np.full(spectralIndex.shape, NO_CLEARING, dtype=np.uint8)
     changeclass[combinedIndex > 21.80] = 34
-    changeclass[(combinedIndex > 27.71) & (sTest < -0.27) & (spectralIndex < -0.86)] = 35
-    changeclass[(combinedIndex > 33.40) & (sTest < -0.60) & (spectralIndex < -1.19)] = 36
-    changeclass[(combinedIndex > 39.54) & (sTest < -1.01) & (spectralIndex < -1.50)] = 37
-    changeclass[(combinedIndex > 47.05) & (sTest < -1.55) & (spectralIndex < -1.84)] = 38
-    changeclass[(combinedIndex > 58.10) & (sTest < -2.34) & (spectralIndex < -2.27)] = 39
+    changeclass[(combinedIndex > 27.71) & (sTest < -0.27) & (spectralIndex < -0.86)] = (
+        35
+    )
+    changeclass[(combinedIndex > 33.40) & (sTest < -0.60) & (spectralIndex < -1.19)] = (
+        36
+    )
+    changeclass[(combinedIndex > 39.54) & (sTest < -1.01) & (spectralIndex < -1.50)] = (
+        37
+    )
+    changeclass[(combinedIndex > 47.05) & (sTest < -1.55) & (spectralIndex < -1.84)] = (
+        38
+    )
+    changeclass[(combinedIndex > 58.10) & (sTest < -2.34) & (spectralIndex < -2.27)] = (
+        39
+    )
     changeclass[(tTest > -1.70) & (fpcDiffStdErr > 740)] = 3
 
     # Optional rule: force no-clearing where raw fpcStart < 108 (applies before nulling by reflectance zeros).
@@ -375,16 +437,32 @@ def main(argv=None) -> int:
     changeclass[refNullMask] = NULL_CLEARING
 
     # Interpretation stretch (legacy scales) and clearing probability.
-    spectralMean = float(np.mean(spectralIndex[spectralIndex != 0])) if np.any(spectralIndex != 0) else 0.0
-    spectralStd  = float(np.std(spectralIndex[spectralIndex != 0])) if np.any(spectralIndex != 0) else 1.0
-    sTestMean    = float(np.mean(sTest[sTest != 0])) if np.any(sTest != 0) else 0.0
-    sTestStd     = float(np.std(sTest[sTest != 0])) if np.any(sTest != 0) else 1.0
-    combMean     = float(np.mean(combinedIndex[combinedIndex != 0])) if np.any(combinedIndex != 0) else 0.0
-    combStd      = float(np.std(combinedIndex[combinedIndex != 0])) if np.any(combinedIndex != 0) else 1.0
+    spectralMean = (
+        float(np.mean(spectralIndex[spectralIndex != 0]))
+        if np.any(spectralIndex != 0)
+        else 0.0
+    )
+    spectralStd = (
+        float(np.std(spectralIndex[spectralIndex != 0]))
+        if np.any(spectralIndex != 0)
+        else 1.0
+    )
+    sTestMean = float(np.mean(sTest[sTest != 0])) if np.any(sTest != 0) else 0.0
+    sTestStd = float(np.std(sTest[sTest != 0])) if np.any(sTest != 0) else 1.0
+    combMean = (
+        float(np.mean(combinedIndex[combinedIndex != 0]))
+        if np.any(combinedIndex != 0)
+        else 0.0
+    )
+    combStd = (
+        float(np.std(combinedIndex[combinedIndex != 0]))
+        if np.any(combinedIndex != 0)
+        else 1.0
+    )
 
     spectralStretched = stretch(spectralIndex, spectralMean, spectralStd, 2, 1, 255, 0)
-    sTestStretched     = stretch(sTest, sTestMean, sTestStd, 10, 1, 255, 0)
-    combinedStretched  = stretch(combinedIndex, combMean, combStd, 10, 1, 255, 0)
+    sTestStretched = stretch(sTest, sTestMean, sTestStd, 10, 1, 255, 0)
+    combinedStretched = stretch(combinedIndex, combMean, combStd, 10, 1, 255, 0)
 
     clearingProb = 200 * (1 - np.exp(-((0.01227 * combinedIndex) ** 3.18975)))
     clearingProb = np.round(clearingProb).astype(np.uint8)
@@ -397,7 +475,13 @@ def main(argv=None) -> int:
     Path(out_cls).parent.mkdir(parents=True, exist_ok=True)
 
     write_envi(out_cls, [changeclass], georef, dtype=gdal.GDT_Byte, nodata=0)
-    write_envi(out_int, [spectralStretched, sTestStretched, combinedStretched, clearingProb], georef, dtype=gdal.GDT_Byte, nodata=0)
+    write_envi(
+        out_int,
+        [spectralStretched, sTestStretched, combinedStretched, clearingProb],
+        georef,
+        dtype=gdal.GDT_Byte,
+        nodata=0,
+    )
 
     if args.verbose:
         print(f"Baseline dates ({len(base_dates)}): {','.join(base_dates)}")
@@ -409,5 +493,5 @@ def main(argv=None) -> int:
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

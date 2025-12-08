@@ -27,7 +27,7 @@ def copy_raster(src: str, dst: str) -> None:
     geotrans, proj = ds.GetGeoTransform(can_return_null=True), ds.GetProjection()
     band = ds.GetRasterBand(1)
     arr = band.ReadAsArray()
-    drv = gdal.GetDriverByName('ENVI')
+    drv = gdal.GetDriverByName("ENVI")
     out = drv.Create(dst, xsize, ysize, 1, band.DataType)
     if geotrans:
         out.SetGeoTransform(geotrans)
@@ -42,9 +42,13 @@ def copy_raster(src: str, dst: str) -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Stub mask application (no-op copy)")
-    ap.add_argument('--infile', required=True)
-    ap.add_argument('--outfile', required=True)
-    ap.add_argument('--omitmask', action='append', help='Ignored; present for interface compatibility')
+    ap.add_argument("--infile", required=True)
+    ap.add_argument("--outfile", required=True)
+    ap.add_argument(
+        "--omitmask",
+        action="append",
+        help="Ignored; present for interface compatibility",
+    )
     args = ap.parse_args(argv)
     try:
         copy_raster(args.infile, args.outfile)
@@ -55,7 +59,7 @@ def main(argv=None) -> int:
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())
 #!/usr/bin/env python
 """

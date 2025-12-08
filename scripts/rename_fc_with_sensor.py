@@ -51,8 +51,15 @@ STAC_ROOT = "https://explorer.dea.ga.gov.au/stac"
 FC_COLLECTION = "ga_ls_fc_3"
 PLAT_ALLOWED = {"landsat-8": "ls8c", "landsat-9": "ls9c"}
 
-FC_REGEX = re.compile(r"^ga_ls_fc_(?P<pathrow>\d{6})_(?P<date>\d{8})_(?P<suffix>fc3ms(?:_clr)?\.tif)$", re.IGNORECASE)
-ALREADY_REGEX = re.compile(r"^ga_ls(8|9)c_fc_(?P<pathrow>\d{6})_(?P<date>\d{8})_(?P<suffix>fc3ms(?:_clr)?\.tif)$", re.IGNORECASE)
+FC_REGEX = re.compile(
+    r"^ga_ls_fc_(?P<pathrow>\d{6})_(?P<date>\d{8})_(?P<suffix>fc3ms(?:_clr)?\.tif)$",
+    re.IGNORECASE,
+)
+ALREADY_REGEX = re.compile(
+    r"^ga_ls(8|9)c_fc_(?P<pathrow>\d{6})_(?P<date>\d{8})_(?P<suffix>fc3ms(?:_clr)?\.tif)$",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class FCFile:
@@ -60,6 +67,7 @@ class FCFile:
     pathrow: str
     date: str  # YYYYMMDD
     suffix: str  # fc3ms.tif or fc3ms_clr.tif
+
 
 def find_fc_files(root: Path, tile: str) -> List[FCFile]:
     tile_dir = root / tile
@@ -72,8 +80,16 @@ def find_fc_files(root: Path, tile: str) -> List[FCFile]:
             continue
         m = FC_REGEX.match(name)
         if m:
-            out.append(FCFile(path=tif, pathrow=m.group("pathrow"), date=m.group("date"), suffix=m.group("suffix")))
+            out.append(
+                FCFile(
+                    path=tif,
+                    pathrow=m.group("pathrow"),
+                    date=m.group("date"),
+                    suffix=m.group("suffix"),
+                )
+            )
     return out
+
 
 def stac_search_fc(pathrow: str, date: str, search_days: int = 0) -> Optional[str]:
     """Query STAC for the FC collection around a date, return platform or None.
@@ -82,11 +98,12 @@ def stac_search_fc(pathrow: str, date: str, search_days: int = 0) -> Optional[st
     for dates where FC product was generated on a nearby day.
     """
     from datetime import datetime, timedelta
+
     tgt = datetime.strptime(date, "%Y%m%d")
     start = tgt - timedelta(days=search_days)
     end = tgt + timedelta(days=search_days)
     time_range = f"{start.strftime('%Y-%m-%d')}/{end.strftime('%Y-%m-%d')}"
-    url = (f"{STAC_ROOT}/search?collection={FC_COLLECTION}&time={time_range}&limit=200")
+    url = f"{STAC_ROOT}/search?collection={FC_COLLECTION}&time={time_range}&limit=200"
     try:
         with urllib.request.urlopen(url, timeout=40) as resp:
             data = json.loads(resp.read().decode())
@@ -114,21 +131,47 @@ def stac_search_fc(pathrow: str, date: str, search_days: int = 0) -> Optional[st
             best = (diff, plat)
     return best[1] if best else None
 
+
 def build_new_name(platform: str, pathrow: str, date: str, suffix: str) -> str:
     sensor_token = PLAT_ALLOWED[platform]  # ls8c or ls9c
     return f"ga_{sensor_token}_fc_{pathrow}_{date}_{suffix}".lower()
 
+
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Rename FC files to sensor-coded prefixes (landsat-8/9)")
-    ap.add_argument("--root", required=True, help="Root data directory (e.g. D:\\data\\lsat)")
+    ap = argparse.ArgumentParser(
+        description="Rename FC files to sensor-coded prefixes (landsat-8/9)"
+    )
+    ap.add_argument(
+        "--root", required=True, help="Root data directory (e.g. D:\\data\\lsat)"
+    )
     ap.add_argument("--tile", required=True, help="Tile PPP_RRR (e.g. 094_076)")
     ap.add_argument("--dry-run", action="store_true", help="Preview renames only")
-    ap.add_argument("--limit", type=int, help="Limit number of files processed (for testing)")
-    ap.add_argument("--cache-json", help="Optional JSON cache of platform lookups (read/write)")
-    ap.add_argument("--search-days", type=int, default=0, help="Expand STAC search window ±days for platform resolution")
-    ap.add_argument("--min-date", help="Skip files with dates earlier than this YYYYMMDD (e.g. 20130501)")
-    ap.add_argument("--fallback-by-date", action="store_true", help="If STAC platform not resolved, infer sensor by date thresholds (>=20210928 -> LS9, >=20130701 -> LS8)")
-    ap.add_argument("--only-uncoded", action="store_true", help="Process only files without sensor prefix (default true)")
+    ap.add_argument(
+        "--limit", type=int, help="Limit number of files processed (for testing)"
+    )
+    ap.add_argument(
+        "--cache-json", help="Optional JSON cache of platform lookups (read/write)"
+    )
+    ap.add_argument(
+        "--search-days",
+        type=int,
+        default=0,
+        help="Expand STAC search window ±days for platform resolution",
+    )
+    ap.add_argument(
+        "--min-date",
+        help="Skip files with dates earlier than this YYYYMMDD (e.g. 20130501)",
+    )
+    ap.add_argument(
+        "--fallback-by-date",
+        action="store_true",
+        help="If STAC platform not resolved, infer sensor by date thresholds (>=20210928 -> LS9, >=20130701 -> LS8)",
+    )
+    ap.add_argument(
+        "--only-uncoded",
+        action="store_true",
+        help="Process only files without sensor prefix (default true)",
+    )
     args = ap.parse_args(argv)
 
     root = Path(args.root)
@@ -141,7 +184,7 @@ def main(argv=None) -> int:
 
     fc_files = find_fc_files(root, args.tile)
     if args.limit:
-        fc_files = fc_files[:args.limit]
+        fc_files = fc_files[: args.limit]
     if not fc_files:
         print("[INFO] No FC files needing sensor rename found.")
         return 0
@@ -160,16 +203,22 @@ def main(argv=None) -> int:
         if not platform:
             if args.fallback_by_date:
                 # Date-based heuristic: Landsat 8 operational mid-2013; Landsat 9 post late 2021
-                if fcf.date >= '20210928':
-                    platform = 'landsat-9'
+                if fcf.date >= "20210928":
+                    platform = "landsat-9"
                     cache[key] = platform
-                    print(f"[FALLBACK] {fcf.path.name}: assigned landsat-9 by date heuristic")
-                elif fcf.date >= '20130701':
-                    platform = 'landsat-8'
+                    print(
+                        f"[FALLBACK] {fcf.path.name}: assigned landsat-9 by date heuristic"
+                    )
+                elif fcf.date >= "20130701":
+                    platform = "landsat-8"
                     cache[key] = platform
-                    print(f"[FALLBACK] {fcf.path.name}: assigned landsat-8 by date heuristic")
+                    print(
+                        f"[FALLBACK] {fcf.path.name}: assigned landsat-8 by date heuristic"
+                    )
                 else:
-                    print(f"[SKIP] {fcf.path.name}: platform not resolved and date < 20130701 (pre-LS8)")
+                    print(
+                        f"[SKIP] {fcf.path.name}: platform not resolved and date < 20130701 (pre-LS8)"
+                    )
                     continue
             else:
                 print(f"[SKIP] {fcf.path.name}: platform not resolved")
@@ -198,11 +247,14 @@ def main(argv=None) -> int:
     if args.cache_json:
         try:
             Path(args.cache_json).parent.mkdir(parents=True, exist_ok=True)
-            Path(args.cache_json).write_text(json.dumps(cache, indent=2), encoding="utf-8")
+            Path(args.cache_json).write_text(
+                json.dumps(cache, indent=2), encoding="utf-8"
+            )
             print(f"[CACHE] Wrote platform cache {args.cache_json}")
         except Exception as e:
             print(f"[WARN] Could not write cache file: {e}")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -31,21 +31,27 @@ from src.database.connection import get_db, init_database
 from src.database.models import LandsatTile
 
 
-def bbox_to_polygon(min_lon: float, min_lat: float, max_lon: float, max_lat: float) -> Dict:
+def bbox_to_polygon(
+    min_lon: float, min_lat: float, max_lon: float, max_lat: float
+) -> Dict:
     # Return GeoJSON Polygon for bbox
     return {
         "type": "Polygon",
-        "coordinates": [[
-            [min_lon, min_lat],
-            [max_lon, min_lat],
-            [max_lon, max_lat],
-            [min_lon, max_lat],
-            [min_lon, min_lat],
-        ]]
+        "coordinates": [
+            [
+                [min_lon, min_lat],
+                [max_lon, min_lat],
+                [max_lon, max_lat],
+                [min_lon, max_lat],
+                [min_lon, min_lat],
+            ]
+        ],
     }
 
 
-def import_csv(csv_path: str, only_missing: bool, update_center: bool) -> Dict[str, int]:
+def import_csv(
+    csv_path: str, only_missing: bool, update_center: bool
+) -> Dict[str, int]:
     stats = {"rows": 0, "updated": 0, "skipped": 0, "missing": 0}
 
     with open(csv_path, "r", encoding="utf-8") as f, get_db() as session:
@@ -59,7 +65,9 @@ def import_csv(csv_path: str, only_missing: bool, update_center: bool) -> Dict[s
             max_lat = float(row["max_lat"])  # type: ignore
 
             tile: LandsatTile | None = (
-                session.query(LandsatTile).filter(LandsatTile.tile_id == tile_id).first()
+                session.query(LandsatTile)
+                .filter(LandsatTile.tile_id == tile_id)
+                .first()
             )
             if not tile:
                 stats["missing"] += 1
@@ -85,10 +93,24 @@ def import_csv(csv_path: str, only_missing: bool, update_center: bool) -> Dict[s
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Import WRS-2 tile bboxes into landsat_tiles table")
-    p.add_argument("--csv", required=True, help="Path to wrs2_tile_bounds.csv produced by wrs2_tile_bounds.py")
-    p.add_argument("--only-missing", action="store_true", help="Only update tiles where bounds_geojson is NULL/empty")
-    p.add_argument("--update-center", action="store_true", help="Also update center_lat/center_lon from bbox center")
+    p = argparse.ArgumentParser(
+        description="Import WRS-2 tile bboxes into landsat_tiles table"
+    )
+    p.add_argument(
+        "--csv",
+        required=True,
+        help="Path to wrs2_tile_bounds.csv produced by wrs2_tile_bounds.py",
+    )
+    p.add_argument(
+        "--only-missing",
+        action="store_true",
+        help="Only update tiles where bounds_geojson is NULL/empty",
+    )
+    p.add_argument(
+        "--update-center",
+        action="store_true",
+        help="Also update center_lat/center_lon from bbox center",
+    )
     return p
 
 

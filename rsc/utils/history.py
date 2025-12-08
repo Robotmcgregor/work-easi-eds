@@ -2,6 +2,7 @@
 Shim for rsc.utils.history used by the QLD script.
 No-op metadata insertion.
 """
+
 from __future__ import annotations
 
 from typing import List, Dict

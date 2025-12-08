@@ -103,7 +103,9 @@ def _read_shapefile(path_shp: str) -> List[Dict[str, Any]]:
     try:
         import shapefile  # pyshp
     except ImportError:
-        raise RuntimeError("Reading Shapefile requires 'pyshp'. Install with: py -m pip install pyshp")
+        raise RuntimeError(
+            "Reading Shapefile requires 'pyshp'. Install with: py -m pip install pyshp"
+        )
 
     if not _os_path.exists(path_shp):
         raise FileNotFoundError(f"Shapefile not found: {path_shp}")
@@ -147,7 +149,11 @@ def _read_shapefile(path_shp: str) -> List[Dict[str, Any]]:
                 if len(s) == 6 and s.isdigit():
                     return int(s[:3]), int(s[3:])
         # Generic: look for any field whose value is a 6-digit numeric (prefer keys containing tile/pr/pathrow)
-        preferred_keys = [k for k in pr.keys() if any(x in k.lower() for x in ["tile", "pr", "pathrow"]) ]
+        preferred_keys = [
+            k
+            for k in pr.keys()
+            if any(x in k.lower() for x in ["tile", "pr", "pathrow"])
+        ]
         for k in preferred_keys + list(pr.keys()):
             try:
                 s = str(pr[k]).strip().replace("_", "")
@@ -158,6 +164,7 @@ def _read_shapefile(path_shp: str) -> List[Dict[str, Any]]:
         # Parse from PopupInfo HTML blob if present
         try:
             import re
+
             info = pr.get("PopupInfo") or pr.get("popupinfo") or lower.get("popupinfo")
             if info:
                 m_path = re.search(r"PATH[^0-9]*([0-9]{1,3})", str(info))
@@ -169,7 +176,11 @@ def _read_shapefile(path_shp: str) -> List[Dict[str, Any]]:
         return None
 
     for sr in r.shapeRecords():
-        rec_map = sr.record.as_dict() if hasattr(sr.record, 'as_dict') else {k: sr.record[i] for i, k in enumerate(fields)}
+        rec_map = (
+            sr.record.as_dict()
+            if hasattr(sr.record, "as_dict")
+            else {k: sr.record[i] for i, k in enumerate(fields)}
+        )
         pr = props_to_tile(rec_map)
         if not pr:
             continue
@@ -185,21 +196,29 @@ def _read_shapefile(path_shp: str) -> List[Dict[str, Any]]:
         min_lon, max_lon = min(xs), max(xs)
         min_lat, max_lat = min(ys), max(ys)
         tile_id = f"{p:03d}{rrow:03d}"
-        rows.append({
-            "tile_id": tile_id,
-            "path": p,
-            "row": rrow,
-            "min_lon": min_lon,
-            "min_lat": min_lat,
-            "max_lon": max_lon,
-            "max_lat": max_lat,
-        })
+        rows.append(
+            {
+                "tile_id": tile_id,
+                "path": p,
+                "row": rrow,
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+            }
+        )
     if not rows:
         # Diagnostic output to help map fields
         try:
             sample = r.shapeRecords()[0].record
-            rec_map = sample.as_dict() if hasattr(sample, 'as_dict') else {k: sample[i] for i, k in enumerate(fields)}
-            print("Warning: No tiles extracted from shapefile. Available fields:", fields)
+            rec_map = (
+                sample.as_dict()
+                if hasattr(sample, "as_dict")
+                else {k: sample[i] for i, k in enumerate(fields)}
+            )
+            print(
+                "Warning: No tiles extracted from shapefile. Available fields:", fields
+            )
             print("Sample record:", rec_map)
         except Exception:
             print("Warning: No tiles extracted and no sample record available.")
@@ -209,7 +228,18 @@ def _read_shapefile(path_shp: str) -> List[Dict[str, Any]]:
 def write_csv(rows: List[Dict[str, Any]], csv_path: str) -> None:
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["tile_id", "path", "row", "min_lon", "min_lat", "max_lon", "max_lat"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "tile_id",
+                "path",
+                "row",
+                "min_lon",
+                "min_lat",
+                "max_lon",
+                "max_lat",
+            ],
+        )
         w.writeheader()
         for r in rows:
             w.writerow(r)
@@ -255,10 +285,23 @@ def write_sqlite(rows: List[Dict[str, Any]], sqlite_path: str) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Build WRS-2 per-tile bounding boxes from GeoJSON or Shapefile")
-    p.add_argument("input_path", help="Path to WRS-2 GeoJSON (.geojson) or Shapefile (.shp)")
-    p.add_argument("--csv", dest="csv_out", default="data/wrs2_tile_bounds.csv", help="Output CSV path")
-    p.add_argument("--sqlite", dest="sqlite_out", help="Optional SQLite DB path to write table wrs2_tile_bounds")
+    p = argparse.ArgumentParser(
+        description="Build WRS-2 per-tile bounding boxes from GeoJSON or Shapefile"
+    )
+    p.add_argument(
+        "input_path", help="Path to WRS-2 GeoJSON (.geojson) or Shapefile (.shp)"
+    )
+    p.add_argument(
+        "--csv",
+        dest="csv_out",
+        default="data/wrs2_tile_bounds.csv",
+        help="Output CSV path",
+    )
+    p.add_argument(
+        "--sqlite",
+        dest="sqlite_out",
+        help="Optional SQLite DB path to write table wrs2_tile_bounds",
+    )
     return p
 
 
@@ -266,7 +309,7 @@ def main(argv=None) -> int:
     ap = build_parser()
     args = ap.parse_args(argv)
     in_path = args.input_path
-    if in_path.lower().endswith('.shp'):
+    if in_path.lower().endswith(".shp"):
         rows = _read_shapefile(in_path)
     else:
         rows = process_geojson(in_path)

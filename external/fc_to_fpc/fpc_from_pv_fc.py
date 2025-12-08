@@ -55,8 +55,15 @@ def mainRoutine():
     outfiles.classImage = cmdargs.output
 
     controls = applier.ApplierControls()
-    controls.setOutputDriverName('GTiff')
-    options = ['COMPRESS=LZW', 'BIGTIFF=YES', 'TILED=YES', 'INTERLEAVE=BAND', 'BLOCKXSIZE=256', 'BLOCKYSIZE=256']
+    controls.setOutputDriverName("GTiff")
+    options = [
+        "COMPRESS=LZW",
+        "BIGTIFF=YES",
+        "TILED=YES",
+        "INTERLEAVE=BAND",
+        "BLOCKXSIZE=256",
+        "BLOCKYSIZE=256",
+    ]
     controls.setCreationOptions(options)
     controls.setWindowXsize(256)
     controls.setWindowYsize(256)
@@ -73,11 +80,11 @@ def mainRoutine():
 
     applier.apply(makeClass, infiles, outfiles, otherargs, controls=controls)
 
-    print(cmdargs.output + 'is complete')
+    print(cmdargs.output + "is complete")
 
 
 def makeClass(info, inputs, outputs, otherargs):
-    np.seterr(all='ignore')
+    np.seterr(all="ignore")
 
     Wfpc = np.array(inputs.fpc[1].astype(np.float32))
     fpc = ma.masked_array(Wfpc, Wfpc == 255)
@@ -95,7 +102,9 @@ def makeClass(info, inputs, outputs, otherargs):
     outputs.classImage = np.array([vegClass_nd], dtype=np.uint8)
 
     # NEW: Save the continuous FPC layer as float32
-    outputs.fpcLayer = np.array([np.ma.filled(fpcC, fill_value=otherargs.coverNull)], dtype=np.float32)
+    outputs.fpcLayer = np.array(
+        [np.ma.filled(fpcC, fill_value=otherargs.coverNull)], dtype=np.float32
+    )
 
 
 if __name__ == "__main__":

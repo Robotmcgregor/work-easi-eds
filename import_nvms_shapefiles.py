@@ -26,21 +26,21 @@ from hashlib import md5
 
 # add src to path
 proj_root = Path(__file__).parent
-sys.path.insert(0, str(proj_root / 'src'))
+sys.path.insert(0, str(proj_root / "src"))
 
 from src.database.connection import DatabaseManager
 from src.database.nvms_models import NVMSDetection, NVMSResult, NVMSRun
 from src.config.settings import get_config
 
-RUN_ID = 'NVMS_QLD_Run03'
+RUN_ID = "NVMS_QLD_Run03"
 # Default input directory for shapefiles (can be overridden with --input-dir)
-DEFAULT_INPUT_DIR = proj_root / 'data' / 'processing_results' / 'Run3'
+DEFAULT_INPUT_DIR = proj_root / "data" / "processing_results" / "Run3"
 
-TILE_RE = re.compile(r'p(\d{3})r(\d{3})', re.IGNORECASE)
+TILE_RE = re.compile(r"p(\d{3})r(\d{3})", re.IGNORECASE)
 
 
 def find_shapefiles(base_dir):
-    return list(base_dir.rglob('*.shp'))
+    return list(base_dir.rglob("*.shp"))
 
 
 def extract_tile_id_from_path(p: Path):
@@ -58,7 +58,9 @@ def extract_tile_id_from_path(p: Path):
 def ensure_run(session, run_id=RUN_ID):
     run = session.query(NVMSRun).filter_by(run_id=run_id).first()
     if not run:
-        run = NVMSRun(run_id=run_id, run_number=3, description='Imported NVMS Run 3 shapefiles')
+        run = NVMSRun(
+            run_id=run_id, run_number=3, description="Imported NVMS Run 3 shapefiles"
+        )
         session.add(run)
         session.flush()
     return run
@@ -72,12 +74,15 @@ def import_shapefile(session, shp_path: Path, run_id=RUN_ID, force=False):
         return 0
 
     # Check existing detections for this run/tile
-    existing_count = session.query(NVMSDetection).filter(
-        NVMSDetection.run_id == run_id,
-        NVMSDetection.tile_id == tile_id
-    ).count()
+    existing_count = (
+        session.query(NVMSDetection)
+        .filter(NVMSDetection.run_id == run_id, NVMSDetection.tile_id == tile_id)
+        .count()
+    )
     if existing_count and not force:
-        print(f"  Detections already exist for {run_id} / {tile_id} ({existing_count}), skipping (use --force to re-import)")
+        print(
+            f"  Detections already exist for {run_id} / {tile_id} ({existing_count}), skipping (use --force to re-import)"
+        )
         return 0
 
     # Read shapefile
@@ -89,10 +94,11 @@ def import_shapefile(session, shp_path: Path, run_id=RUN_ID, force=False):
         gdf = gdf.to_crs(epsg=4326)
 
     # Find linking NVMSResult (if previously inserted)
-    nvms_result = session.query(NVMSResult).filter(
-        NVMSResult.run_id == run_id,
-        NVMSResult.tile_id == tile_id
-    ).first()
+    nvms_result = (
+        session.query(NVMSResult)
+        .filter(NVMSResult.run_id == run_id, NVMSResult.tile_id == tile_id)
+        .first()
+    )
 
     imported = 0
     for _, row in gdf.iterrows():
@@ -108,7 +114,7 @@ def import_shapefile(session, shp_path: Path, run_id=RUN_ID, force=False):
         wkt = geom.wkt
         normalized_wkt = " ".join(wkt.split())
         # build deterministic hash across run/tile/geometry
-        h = md5(f"{run_id}|{tile_id}|{normalized_wkt}".encode('utf-8')).hexdigest()
+        h = md5(f"{run_id}|{tile_id}|{normalized_wkt}".encode("utf-8")).hexdigest()
 
         det = NVMSDetection(
             run_id=run_id,
@@ -118,7 +124,7 @@ def import_shapefile(session, shp_path: Path, run_id=RUN_ID, force=False):
             geom_geojson=geojson_geom,
             geom_wkt=normalized_wkt,
             geom_hash=h,
-            imported_at=datetime.utcnow()
+            imported_at=datetime.utcnow(),
         )
         # Avoid duplicate inserts by catching unique constraint violations
         try:
@@ -137,8 +143,14 @@ def import_shapefile(session, shp_path: Path, run_id=RUN_ID, force=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--force', action='store_true', help='Re-import even if detections exist')
-    parser.add_argument('--input-dir', type=str, help='Override input directory containing shapefiles (default: data/processing_results/Run3)')
+    parser.add_argument(
+        "--force", action="store_true", help="Re-import even if detections exist"
+    )
+    parser.add_argument(
+        "--input-dir",
+        type=str,
+        help="Override input directory containing shapefiles (default: data/processing_results/Run3)",
+    )
     args = parser.parse_args()
 
     config = get_config()
@@ -148,11 +160,14 @@ def main():
     # Ensure PostGIS extension exists (required for Geometry column)
     try:
         from sqlalchemy import text
+
         with db.engine.connect() as conn:
-            conn.execute(text('CREATE EXTENSION IF NOT EXISTS postgis'))
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
             conn.commit()
     except Exception as e:
-        print(f"Warning: could not create PostGIS extension: {e}\nIf your database does not have PostGIS enabled, the geometry column creation will fail.")
+        print(
+            f"Warning: could not create PostGIS extension: {e}\nIf your database does not have PostGIS enabled, the geometry column creation will fail."
+        )
 
     db.create_tables()
 
@@ -168,7 +183,9 @@ def main():
         ensure_run(session, RUN_ID)
         for shp in shp_files:
             try:
-                imported = import_shapefile(session, shp, run_id=RUN_ID, force=args.force)
+                imported = import_shapefile(
+                    session, shp, run_id=RUN_ID, force=args.force
+                )
                 total += imported
             except Exception as e:
                 print(f"Error importing {shp}: {e}")
@@ -177,5 +194,6 @@ def main():
 
     print(f"Done. Total detections imported: {total}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

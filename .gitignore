@@ -26,3 +26,7 @@ data/**
 # Build artifacts
 *.log
 *.tmp
+exports/
+assets/
+data/
+output/
