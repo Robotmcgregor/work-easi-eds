@@ -1,12 +1,13 @@
 """Ensure nvms_detections has geom_hash populated and unique index.
 Run: python scripts\ensure_nvms_geom_hash.py
 """
+
 from hashlib import md5
 from sqlalchemy import text
 from src.config import load_config
 from src.database.connection import DatabaseManager
 
-DEF_INDEX = 'ux_nvms_geom_hash'
+DEF_INDEX = "ux_nvms_geom_hash"
 
 UPDATE_BATCH_SQL = """
 UPDATE nvms_detections
@@ -26,6 +27,7 @@ ON nvms_detections(geom_hash);
 
 CHECK_NULLS_SQL = "SELECT COUNT(*) FROM nvms_detections WHERE geom_hash IS NULL;"
 
+
 def main():
     cfg = load_config()
     db = DatabaseManager(cfg.database.connection_url)
@@ -43,5 +45,6 @@ def main():
         conn.commit()
         print("Done.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -57,6 +57,7 @@ from osgeo import gdal
 try:
     from rsc.utils.metadb import stdProjFilename
 except Exception:
+
     def stdProjFilename(name: str) -> str:
         return name
 
@@ -67,6 +68,7 @@ except Exception:
 #     if not m:
 #         raise ValueError(f"Cannot parse date from {path}")
 #     return m.group(0)
+
 
 def parse_date(path: str) -> str:
     """
@@ -99,7 +101,6 @@ def parse_date(path: str) -> str:
     return m.group(0)
 
 
-
 # def decimal_year(yyyymmdd: str) -> float:
 #     import datetime
 #     y = int(yyyymmdd[:4]); m = int(yyyymmdd[4:6]); d = int(yyyymmdd[6:])
@@ -109,6 +110,7 @@ def parse_date(path: str) -> str:
 #     doy = (date - jan1).days
 #     days = (dec31 - jan1).days + 1
 #     return y + doy / days
+
 
 def decimal_year(yyyymmdd: str) -> float:
     """
@@ -148,12 +150,14 @@ def decimal_year(yyyymmdd: str) -> float:
     # For example, halfway through the year is roughly y + 0.5.
     return y + doy / days
 
+
 # def _parse_mmdd(mmdd: str) -> Tuple[int, int]:
 #     if len(mmdd) != 4 or not mmdd.isdigit():
 #         raise ValueError("MMDD must be 4 digits, e.g., 0701")
 #     return int(mmdd[:2]), int(mmdd[2:])
 
 from typing import Tuple
+
 
 def _parse_mmdd(mmdd: str) -> Tuple[int, int]:
     """
@@ -175,6 +179,7 @@ def _parse_mmdd(mmdd: str) -> Tuple[int, int]:
     day = int(mmdd[2:])
 
     return month, day
+
 
 # def in_window(yyyymmdd: str, start_mmdd: str, end_mmdd: str) -> bool:
 #     m = int(yyyymmdd[4:6]); d = int(yyyymmdd[6:8])
@@ -237,6 +242,7 @@ def in_window(yyyymmdd: str, start_mmdd: str, end_mmdd: str) -> bool:
 # import numpy as np
 # from osgeo import gdal
 
+
 def load_raster(path: str) -> Tuple[np.ndarray, Tuple]:
     """
     Open a raster file and return:
@@ -257,10 +263,7 @@ def load_raster(path: str) -> Tuple[np.ndarray, Tuple]:
     # Read each band (layer) into memory as a 2D array.
     # ds.RasterCount tells us how many bands the raster has.
     # GetRasterBand(i+1) because GDAL bands are 1-based (start at 1, not 0).
-    bands = [
-        ds.GetRasterBand(i + 1).ReadAsArray()
-        for i in range(ds.RasterCount)
-    ]
+    bands = [ds.GetRasterBand(i + 1).ReadAsArray() for i in range(ds.RasterCount)]
 
     # Stack the band arrays into a single 3D array:
     #   (band, row, column)
@@ -269,10 +272,7 @@ def load_raster(path: str) -> Tuple[np.ndarray, Tuple]:
     # Store the georeferencing:
     # - GeoTransform: how pixel coordinates map to real-world coordinates.
     # - Projection: the coordinate reference system (e.g. EPSG:3577).
-    georef = (
-        ds.GetGeoTransform(can_return_null=True),
-        ds.GetProjection()
-    )
+    georef = (ds.GetGeoTransform(can_return_null=True), ds.GetProjection())
 
     # Close the dataset to free resources.
     ds = None
@@ -337,10 +337,10 @@ def write_envi(
     drv = gdal.GetDriverByName("ENVI")
     ds = drv.Create(
         out_path,
-        xsize,             # number of columns
-        ysize,             # number of rows
-        len(arrays),       # number of bands
-        dtype,             # pixel data type
+        xsize,  # number of columns
+        ysize,  # number of rows
+        len(arrays),  # number of bands
+        dtype,  # pixel data type
     )
 
     # Attach georeferencing if we have it.
@@ -467,9 +467,9 @@ from typing import List, Tuple
 import math
 import numpy as np
 
+
 def timeseries_stats(
-    norm_list: List[np.ndarray],
-    date_list: List[str]
+    norm_list: List[np.ndarray], date_list: List[str]
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Calculate basic time-series statistics for a stack of normalised FPC images.
@@ -537,10 +537,9 @@ def timeseries_stats(
             #   slope = sum( (t - t_mean) * (y - y_mean) ) / sum( (t - t_mean)^2 )
             #
             # We do this for every pixel in one go by using broadcasting.
-            slope = np.sum(
-                ((t - t_mean)[:, None, None]) * (stack - y_mean),
-                axis=0
-            ) / denom
+            slope = (
+                np.sum(((t - t_mean)[:, None, None]) * (stack - y_mean), axis=0) / denom
+            )
 
             # Intercept: value of the line when t = 0,
             # derived from: y = slope * t + intercept -> intercept = y_mean - slope * t_mean
@@ -562,7 +561,6 @@ def timeseries_stats(
 #     stretched = stretched.astype(np.float32)
 #     stretched[img == ignoreVal] = 0
 #     return stretched.astype(np.uint8)
-
 
 
 def stretch(
@@ -599,11 +597,8 @@ def stretch(
     #       -> scales 0..1 into the desired output range.
     #   + minVal
     #       -> shifts the range to start at minVal.
-    stretched = (
-        minVal
-        + (img - mean + stddev * numStdDev)
-        * (maxVal - minVal)
-        / (stddev * 2 * numStdDev)
+    stretched = minVal + (img - mean + stddev * numStdDev) * (maxVal - minVal) / (
+        stddev * 2 * numStdDev
     )
 
     # Clip anything outside the range into [minVal, maxVal].
@@ -618,7 +613,6 @@ def stretch(
 
     # Return as 8-bit integers (0–255), suitable for ENVI / display.
     return stretched.astype(np.uint8)
-
 
 
 # def main(argv=None) -> int:
@@ -885,19 +879,52 @@ def main(argv=None) -> int:
     # ---------------------------------------------
     # 1. Read command-line options
     # ---------------------------------------------
-    ap = argparse.ArgumentParser(description="Legacy-method change detection (seasonal window)")
-    ap.add_argument('--scene', required=True, help="Scene code, e.g. p104r072")
-    ap.add_argument('--start-date', required=True, help="Start date YYYYMMDD (baseline up to here, FPC start target)")
-    ap.add_argument('--end-date', required=True, help="End date YYYYMMDD (FPC end target)")
-    ap.add_argument('--dc4-glob', help="Optional glob for dc4 FPC images; if missing, use default compat layout")
-    ap.add_argument('--start-db8', help="Optional explicit path to start reflectance stack (db8)")
-    ap.add_argument('--end-db8', help="Optional explicit path to end reflectance stack (db8)")
-    ap.add_argument('--window-start', help="Seasonal window start as MMDD; defaults to start-date month/day")
-    ap.add_argument('--window-end', help="Seasonal window end as MMDD; defaults to end-date month/day")
-    ap.add_argument('--lookback', type=int, default=10, help="How many years to look back for the baseline (default 10)")
-    ap.add_argument('--omit-fpc-start-threshold', action='store_true',
-                    help="Skip the rule that forces no-clearing where starting FPC < 108")
-    ap.add_argument('--verbose', action='store_true', help="Print extra information (baseline dates, output paths)")
+    ap = argparse.ArgumentParser(
+        description="Legacy-method change detection (seasonal window)"
+    )
+    ap.add_argument("--scene", required=True, help="Scene code, e.g. p104r072")
+    ap.add_argument(
+        "--start-date",
+        required=True,
+        help="Start date YYYYMMDD (baseline up to here, FPC start target)",
+    )
+    ap.add_argument(
+        "--end-date", required=True, help="End date YYYYMMDD (FPC end target)"
+    )
+    ap.add_argument(
+        "--dc4-glob",
+        help="Optional glob for dc4 FPC images; if missing, use default compat layout",
+    )
+    ap.add_argument(
+        "--start-db8", help="Optional explicit path to start reflectance stack (db8)"
+    )
+    ap.add_argument(
+        "--end-db8", help="Optional explicit path to end reflectance stack (db8)"
+    )
+    ap.add_argument(
+        "--window-start",
+        help="Seasonal window start as MMDD; defaults to start-date month/day",
+    )
+    ap.add_argument(
+        "--window-end",
+        help="Seasonal window end as MMDD; defaults to end-date month/day",
+    )
+    ap.add_argument(
+        "--lookback",
+        type=int,
+        default=10,
+        help="How many years to look back for the baseline (default 10)",
+    )
+    ap.add_argument(
+        "--omit-fpc-start-threshold",
+        action="store_true",
+        help="Skip the rule that forces no-clearing where starting FPC < 108",
+    )
+    ap.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print extra information (baseline dates, output paths)",
+    )
     args = ap.parse_args(argv)
 
     # Normalise scene code to lower case (e.g. 'P104R072' -> 'p104r072')
@@ -905,7 +932,7 @@ def main(argv=None) -> int:
 
     # Short names for the key dates:
     sd = args.start_date  # start date YYYYMMDD (string)
-    ed = args.end_date    # end date   YYYYMMDD (string)
+    ed = args.end_date  # end date   YYYYMMDD (string)
 
     # Seasonal window:
     # If the user did not specify a window, use the month+day from
@@ -913,7 +940,7 @@ def main(argv=None) -> int:
     #   ws = start month/day  (MMDD)
     #   we = end   month/day  (MMDD)
     ws = args.window_start or sd[4:]
-    we = args.window_end   or ed[4:]
+    we = args.window_end or ed[4:]
 
     # ---------------------------------------------
     # 2. Find the input reflectance stacks (db8)
@@ -926,11 +953,13 @@ def main(argv=None) -> int:
         end_db8 = args.end_db8
     else:
         start_db8 = stdProjFilename(f"lztmre_{scene}_{sd}_db8mz.img")
-        end_db8   = stdProjFilename(f"lztmre_{scene}_{ed}_db8mz.img")
+        end_db8 = stdProjFilename(f"lztmre_{scene}_{ed}_db8mz.img")
 
     # Basic safety check: both files must exist.
     if not os.path.exists(start_db8) or not os.path.exists(end_db8):
-        raise SystemExit("Start/end db8 files not found; provide --start-db8/--end-db8 or build them.")
+        raise SystemExit(
+            "Start/end db8 files not found; provide --start-db8/--end-db8 or build them."
+        )
 
     # ---------------------------------------------
     # 3. Find the FPC time-series (dc4 images)
@@ -959,14 +988,14 @@ def main(argv=None) -> int:
 
     # Load each dc4 image (FPC). Each dc4 is expected to be a single band.
     raw_dc4 = []  # list of 2D arrays, one per date
-    dates = []    # corresponding list of dates as 'YYYYMMDD' strings
+    dates = []  # corresponding list of dates as 'YYYYMMDD' strings
     for p in dc4_files:
         arr, _ = load_raster(p)
         if arr.shape[0] != 1:
             # The code expects dc4 images to be 1-band rasters.
             raise SystemExit(f"dc4 must be single band: {p}")
-        raw_dc4.append(arr[0])      # take the single band
-        dates.append(parse_date(p)) # extract date from filename
+        raw_dc4.append(arr[0])  # take the single band
+        dates.append(parse_date(p))  # extract date from filename
 
     # The reflectance and dc4 images might not be *exactly* the same size.
     # To keep everything consistent, we crop all arrays to the smallest
@@ -996,7 +1025,7 @@ def main(argv=None) -> int:
 
     # Crop & convert reflectance to float32 for later maths
     ref_start = crop(ref_start).astype(np.float32)
-    ref_end   = crop(ref_end).astype(np.float32)
+    ref_end = crop(ref_end).astype(np.float32)
 
     # Crop all dc4 images to the common shape
     raw_dc4 = [crop(a) for a in raw_dc4]
@@ -1055,7 +1084,11 @@ def main(argv=None) -> int:
     #   "all available dc4 prior to start within the window"
     if len(base_dates) < 2:
         base_dates = [d for d in dates if (d <= start_cutoff and in_window(d, ws, we))]
-        base_raw = [a for d, a in zip(dates, raw_dc4) if (d <= start_cutoff and in_window(d, ws, we))]
+        base_raw = [
+            a
+            for d, a in zip(dates, raw_dc4)
+            if (d <= start_cutoff and in_window(d, ws, we))
+        ]
         if len(base_dates) < 2:
             # The algorithm requires at least 2 images to define a baseline.
             raise SystemExit("Baseline too small (<2 images) after seasonal filtering")
@@ -1069,7 +1102,9 @@ def main(argv=None) -> int:
     # For each pixel, we now compute:
     #   - mean, std, standard error
     #   - slope and intercept of a linear trend over time (decimal years)
-    ts_mean, ts_std, ts_stderr, ts_slope, ts_intercept = timeseries_stats(base_norm, base_dates)
+    ts_mean, ts_std, ts_stderr, ts_slope, ts_intercept = timeseries_stats(
+        base_norm, base_dates
+    )
 
     # ---------------------------------------------
     # 7. Pick start and end FPC images for change detection
@@ -1090,8 +1125,10 @@ def main(argv=None) -> int:
             if not in_window(d, ws, we):
                 continue
             import datetime
+
             def to_date(s):
                 return datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+
             dist = abs((to_date(d) - to_date(target)).days)
             if best is None or dist < best[0]:
                 best = (dist, i)
@@ -1099,15 +1136,15 @@ def main(argv=None) -> int:
         return best[1] if best else 0
 
     idx_start = nearest_idx(sd, dates)
-    idx_end   = nearest_idx(ed, dates)
+    idx_end = nearest_idx(ed, dates)
 
     # Corresponding raw FPC images
     fpc_start_raw = raw_dc4[idx_start]
-    fpc_end_raw   = raw_dc4[idx_end]
+    fpc_end_raw = raw_dc4[idx_end]
 
     # Normalised versions for use in the indices/tests
     fpc_start_norm = normalise_fpc(fpc_start_raw)
-    fpc_end_norm   = normalise_fpc(fpc_end_raw)
+    fpc_end_norm = normalise_fpc(fpc_end_raw)
 
     # ---------------------------------------------
     # 8. Compute legacy indices and tests
@@ -1132,21 +1169,19 @@ def main(argv=None) -> int:
 
     # Pixels where we trust the baseline stats:
     valid_stderr = ts_stderr >= 0.2
-    valid_std    = ts_std    >= 0.2
+    valid_std = ts_std >= 0.2
 
     # sTest: how far the observed FPC is from the predicted trend
     # in units of standard error.
     sTest[valid_stderr] = (
-        (observedNormedFpc[valid_stderr] - predictedNormedFpc[valid_stderr])
-        / ts_stderr[valid_stderr]
-    )
+        observedNormedFpc[valid_stderr] - predictedNormedFpc[valid_stderr]
+    ) / ts_stderr[valid_stderr]
 
     # tTest: how far the observed FPC is from the baseline mean
     # in units of standard deviation.
-    tTest[valid_std] = (
-        (observedNormedFpc[valid_std] - ts_mean[valid_std])
-        / ts_std[valid_std]
-    )
+    tTest[valid_std] = (observedNormedFpc[valid_std] - ts_mean[valid_std]) / ts_std[
+        valid_std
+    ]
 
     # ---------------------------------------------
     # 9. Spectral index from start/end reflectance (db8)
@@ -1154,25 +1189,25 @@ def main(argv=None) -> int:
     # The spectral index combines multiple reflectance bands (2,3,5,6)
     # at start and end, using legacy weights and log1p() for stability.
     refStart = ref_start
-    refEnd   = ref_end
+    refEnd = ref_end
 
     spectralIndex = (
-        (0.77801094 * np.log1p(refStart[1])) +
-        (1.7713253  * np.log1p(refStart[2])) +
-        (2.0714311  * np.log1p(refStart[4])) +
-        (2.5403550  * np.log1p(refStart[5])) +
-        (-0.2996241 * np.log1p(refEnd[1])) +
-        (-0.5447928 * np.log1p(refEnd[2])) +
-        (-2.2842536 * np.log1p(refEnd[4])) +
-        (-4.0177752 * np.log1p(refEnd[5]))
+        (0.77801094 * np.log1p(refStart[1]))
+        + (1.7713253 * np.log1p(refStart[2]))
+        + (2.0714311 * np.log1p(refStart[4]))
+        + (2.5403550 * np.log1p(refStart[5]))
+        + (-0.2996241 * np.log1p(refEnd[1]))
+        + (-0.5447928 * np.log1p(refEnd[2]))
+        + (-2.2842536 * np.log1p(refEnd[4]))
+        + (-4.0177752 * np.log1p(refEnd[5]))
     ).astype(np.float32)
 
     # Combined index that mixes spectral change, FPC change, and the tests.
     combinedIndex = (
         -11.972499 * spectralIndex
         - 0.40357223 * fpcDiff
-        - 5.2609715  * tTest
-        - 4.3794265  * sTest
+        - 5.2609715 * tTest
+        - 4.3794265 * sTest
     ).astype(np.float32)
 
     # ---------------------------------------------
@@ -1182,7 +1217,7 @@ def main(argv=None) -> int:
     #   10 = no clearing (default)
     #   3  = FPC-only signal
     #   34..39 = increasing clearing confidence/strength
-    NO_CLEARING   = 10
+    NO_CLEARING = 10
     NULL_CLEARING = 0
 
     # Start with all pixels set to "no clearing".
@@ -1190,11 +1225,21 @@ def main(argv=None) -> int:
 
     # Apply a set of legacy threshold rules to classify clearing strength.
     changeclass[combinedIndex > 21.80] = 34
-    changeclass[(combinedIndex > 27.71) & (sTest < -0.27) & (spectralIndex < -0.86)] = 35
-    changeclass[(combinedIndex > 33.40) & (sTest < -0.60) & (spectralIndex < -1.19)] = 36
-    changeclass[(combinedIndex > 39.54) & (sTest < -1.01) & (spectralIndex < -1.50)] = 37
-    changeclass[(combinedIndex > 47.05) & (sTest < -1.55) & (spectralIndex < -1.84)] = 38
-    changeclass[(combinedIndex > 58.10) & (sTest < -2.34) & (spectralIndex < -2.27)] = 39
+    changeclass[(combinedIndex > 27.71) & (sTest < -0.27) & (spectralIndex < -0.86)] = (
+        35
+    )
+    changeclass[(combinedIndex > 33.40) & (sTest < -0.60) & (spectralIndex < -1.19)] = (
+        36
+    )
+    changeclass[(combinedIndex > 39.54) & (sTest < -1.01) & (spectralIndex < -1.50)] = (
+        37
+    )
+    changeclass[(combinedIndex > 47.05) & (sTest < -1.55) & (spectralIndex < -1.84)] = (
+        38
+    )
+    changeclass[(combinedIndex > 58.10) & (sTest < -2.34) & (spectralIndex < -2.27)] = (
+        39
+    )
 
     # Class 3: strong FPC signal where FPC change is large and tTest is
     # not strongly negative (so we treat it differently from clearing).
@@ -1216,12 +1261,28 @@ def main(argv=None) -> int:
     # ---------------------------------------------
     # For visual interpretation, we stretch the spectral, sTest, and combined
     # indices into 1..255 ranges, and compute a clearing probability.
-    spectralMean = float(np.mean(spectralIndex[spectralIndex != 0])) if np.any(spectralIndex != 0) else 0.0
-    spectralStd  = float(np.std(spectralIndex[spectralIndex != 0]))  if np.any(spectralIndex != 0) else 1.0
-    sTestMean    = float(np.mean(sTest[sTest != 0]))                  if np.any(sTest != 0)         else 0.0
-    sTestStd     = float(np.std(sTest[sTest != 0]))                   if np.any(sTest != 0)         else 1.0
-    combMean     = float(np.mean(combinedIndex[combinedIndex != 0]))  if np.any(combinedIndex != 0) else 0.0
-    combStd      = float(np.std(combinedIndex[combinedIndex != 0]))   if np.any(combinedIndex != 0) else 1.0
+    spectralMean = (
+        float(np.mean(spectralIndex[spectralIndex != 0]))
+        if np.any(spectralIndex != 0)
+        else 0.0
+    )
+    spectralStd = (
+        float(np.std(spectralIndex[spectralIndex != 0]))
+        if np.any(spectralIndex != 0)
+        else 1.0
+    )
+    sTestMean = float(np.mean(sTest[sTest != 0])) if np.any(sTest != 0) else 0.0
+    sTestStd = float(np.std(sTest[sTest != 0])) if np.any(sTest != 0) else 1.0
+    combMean = (
+        float(np.mean(combinedIndex[combinedIndex != 0]))
+        if np.any(combinedIndex != 0)
+        else 0.0
+    )
+    combStd = (
+        float(np.std(combinedIndex[combinedIndex != 0]))
+        if np.any(combinedIndex != 0)
+        else 1.0
+    )
 
     # Debug prints to help understand the stretch statistics.
     print(f"[EDS DEBUG] - spectralMean {spectralMean}")
@@ -1233,8 +1294,8 @@ def main(argv=None) -> int:
 
     # Stretch each index into display-friendly 1..255 range.
     spectralStretched = stretch(spectralIndex, spectralMean, spectralStd, 2, 1, 255, 0)
-    sTestStretched    = stretch(sTest,         sTestMean,    sTestStd,    10, 1, 255, 0)
-    combinedStretched = stretch(combinedIndex, combMean,     combStd,     10, 1, 255, 0)
+    sTestStretched = stretch(sTest, sTestMean, sTestStd, 10, 1, 255, 0)
+    combinedStretched = stretch(combinedIndex, combMean, combStd, 10, 1, 255, 0)
 
     # Clearing probability formula from the legacy method.
     clearingProb = 200 * (1 - np.exp(-((0.01227 * combinedIndex) ** 3.18975)))
@@ -1285,7 +1346,7 @@ def main(argv=None) -> int:
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # When run as a script (not imported), execute main() and exit
     # with its return code.
     raise SystemExit(main())

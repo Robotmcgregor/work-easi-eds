@@ -1,6 +1,7 @@
 """
 Helpers to resolve tile metadata from the database (e.g., bounding boxes) for use in CLIs.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,7 +26,11 @@ def get_tile_bbox(tile_id: str) -> Optional[Tuple[float, float, float, float]]:
             return None
 
         # Support Feature wrapper
-        if isinstance(geom_obj, dict) and geom_obj.get("type") == "Feature" and "geometry" in geom_obj:
+        if (
+            isinstance(geom_obj, dict)
+            and geom_obj.get("type") == "Feature"
+            and "geometry" in geom_obj
+        ):
             geom_obj = geom_obj.get("geometry")
 
         def iter_xy_from_geom(gobj):
@@ -35,6 +40,7 @@ def get_tile_bbox(tile_id: str) -> Optional[Tuple[float, float, float, float]]:
             coords = gobj.get("coordinates")
             if not gtype or coords is None:
                 return
+
             def emit_xy(pt):
                 # pt may be [x,y] or [x,y,z] or nested; normalize to first two numbers
                 if isinstance(pt, (list, tuple)) and len(pt) >= 2:
@@ -44,6 +50,7 @@ def get_tile_bbox(tile_id: str) -> Optional[Tuple[float, float, float, float]]:
                         yield float(x0), float(y0)
                     except Exception:
                         return
+
             if gtype == "Polygon":
                 for ring in coords:
                     for pt in ring:

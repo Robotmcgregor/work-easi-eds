@@ -142,17 +142,18 @@ def run_cmd(cmd: List[str], dry_run: bool, step: str, results: dict) -> None:
 
     # Make sure there is a 'steps' list in the results dict, then append a summary
     # of this step. This structure is easy to convert to JSON later.
-    results.setdefault('steps', []).append({
-        'step': step,                    # name of this pipeline step
-        'command': cmd,                  # full command we ran
-        'returncode': proc.returncode,   # 0 means success, anything else = error
-        'duration_sec': dt,              # how long it took, in seconds
-
-        # We only keep the *last* 4000 characters of stdout/stderr.
-        # This keeps the log manageable but still shows recent messages.
-        'stdout': proc.stdout[-4000:],
-        'stderr': proc.stderr[-4000:],
-    })
+    results.setdefault("steps", []).append(
+        {
+            "step": step,  # name of this pipeline step
+            "command": cmd,  # full command we ran
+            "returncode": proc.returncode,  # 0 means success, anything else = error
+            "duration_sec": dt,  # how long it took, in seconds
+            # We only keep the *last* 4000 characters of stdout/stderr.
+            # This keeps the log manageable but still shows recent messages.
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-4000:],
+        }
+    )
 
     # If the command failed (non-zero return code), show all its output
     # on the screen and stop the whole pipeline with a clear error.
@@ -190,13 +191,13 @@ def derive_scene(tile: str) -> str:
     # Basic safety check:
     #   - there must be an underscore
     #   - the total length must be exactly 7 characters, e.g. "094_076"
-    if '_' not in tile or len(tile) != 7:
+    if "_" not in tile or len(tile) != 7:
         raise ValueError("Tile must be PPP_RRR e.g. '094_076'")
 
     # Split "PPP_RRR" into:
     #   p = "PPP" (path)
     #   r = "RRR" (row)
-    p, r = tile.split('_')
+    p, r = tile.split("_")
 
     # Build and return the scene code "pPPPrRRR".
     return f"p{p}r{r}"
@@ -370,6 +371,7 @@ def derive_scene(tile: str) -> str:
 # from pathlib import Path
 # from typing import List, Tuple
 
+
 def _resolve_sr_input(
     hint: str,
     date_tag: str,
@@ -417,9 +419,9 @@ def _resolve_sr_input(
     # 0. Basic tile → scene conversion
     # ----------------------------------------
     # Tile must be 'PPP_RRR', e.g. "104_072".
-    if '_' not in tile:
+    if "_" not in tile:
         raise ValueError("Tile must be PPP_RRR e.g. 104_072")
-    p, r = tile.split('_')
+    p, r = tile.split("_")
 
     # Scene code is 'pPPPrRRR', e.g. "p104r072".
     scene = f"p{p}r{r}".lower()
@@ -449,7 +451,7 @@ def _resolve_sr_input(
             (chosen_path, chosen_date)
         """
         tgt = _dt.strptime(target, "%Y%m%d").date()
-        best = None      # (path, date_str)
+        best = None  # (path, date_str)
         best_key = None  # (abs_day_difference, -int(date_str))
 
         for pth in paths:
@@ -556,9 +558,9 @@ def _resolve_sr_input(
         #   1) base / p104r072 / sr / YYYY / YYYYMM  (scene directory)
         #   2) base / 104_072 / sr / YYYY / YYYYMM  (tile with underscore)
         #   3) base / 104 / 072 / sr / YYYY / YYYYMM (separate path/row dirs)
-        easi_dir      = base / scene / "sr" / yyyy / yyyymm
-        underscore_dir = base / tile  / "sr" / yyyy / yyyymm
-        split_dir      = base / p / r / "sr" / yyyy / yyyymm
+        easi_dir = base / scene / "sr" / yyyy / yyyymm
+        underscore_dir = base / tile / "sr" / yyyy / yyyymm
+        split_dir = base / p / r / "sr" / yyyy / yyyymm
 
         # Search these candidate directories for exact date patterns first.
         for ddir in (easi_dir, underscore_dir, split_dir):
@@ -578,9 +580,9 @@ def _resolve_sr_input(
 
     for base in roots:
         base = Path(base)
-        easi_dir      = base / scene / "sr" / yyyy / yyyymm
-        underscore_dir = base / tile  / "sr" / yyyy / yyyymm
-        split_dir      = base / p / r / "sr" / yyyy / yyyymm
+        easi_dir = base / scene / "sr" / yyyy / yyyymm
+        underscore_dir = base / tile / "sr" / yyyy / yyyymm
+        split_dir = base / p / r / "sr" / yyyy / yyyymm
 
         for ddir in (easi_dir, underscore_dir, split_dir):
             for pat in any_patterns:
@@ -598,7 +600,9 @@ def _resolve_sr_input(
     for base in roots:
         base = Path(base)
         for pat in exact_patterns:
-            broad.extend(glob.glob(str(base / scene / "sr" / "**" / pat), recursive=True))
+            broad.extend(
+                glob.glob(str(base / scene / "sr" / "**" / pat), recursive=True)
+            )
         if broad:
             break  # stop at first root that yields something
 
@@ -613,7 +617,9 @@ def _resolve_sr_input(
     for base in roots:
         base = Path(base)
         for pat in any_patterns:
-            any_all.extend(glob.glob(str(base / scene / "sr" / "**" / pat), recursive=True))
+            any_all.extend(
+                glob.glob(str(base / scene / "sr" / "**" / pat), recursive=True)
+            )
         if any_all:
             break  # stop when we get some hits from a root
 
@@ -625,13 +631,15 @@ def _resolve_sr_input(
     # 7. If everything failed: stop with a clear error message
     # ----------------------------------------
     raise SystemExit(
-        "\n".join([
-            f"[ERR] Could not resolve SR input for {tile} date {date_tag}.",
-            " Hint: provide --sr-dir-start/--sr-dir-end as either:",
-            "   - a directory containing SR bands, or",
-            "   - a direct *_nbart6m*.tif / *_srb7.tif path.",
-            f" Searched roots: {roots or 'N/A'}",
-        ])
+        "\n".join(
+            [
+                f"[ERR] Could not resolve SR input for {tile} date {date_tag}.",
+                " Hint: provide --sr-dir-start/--sr-dir-end as either:",
+                "   - a directory containing SR bands, or",
+                "   - a direct *_nbart6m*.tif / *_srb7.tif path.",
+                f" Searched roots: {roots or 'N/A'}",
+            ]
+        )
     )
 
 
@@ -756,7 +764,6 @@ def _resolve_sr_input(
 #     # Legacy FC lookback years (still capped)
 #     lookback = min(args.span_years, args.lookback_cap)
 #     print(f"[DEBUG] lookback: {lookback}")
-
 
 
 #     results = {
@@ -916,7 +923,6 @@ def _resolve_sr_input(
 #     run_cmd(cmd_post, args.dry_run, "vector_postprocess", results)
 
 
-
 #     # 6. FC coverage: union footprint + presence ratio masks over dc4 stack
 #     fc_cov_dir = compat_dir / 'fc_coverage'
 #     fc_cov_dir.mkdir(parents=True, exist_ok=True)
@@ -940,7 +946,6 @@ def _resolve_sr_input(
 #         cmd_cov.append("--save-per-input-masks")
 
 #     run_cmd(cmd_cov, args.dry_run, "fc_coverage", results)
-
 
 
 #     # 7. Clip strict/ratio if available: clip to strict or ratio presence footprints
@@ -985,7 +990,6 @@ def _resolve_sr_input(
 #             "--dest-dir", args.package_dest,
 #         ]
 #         run_cmd(cmd_pkg, args.dry_run, "package_outputs", results)
-
 
 
 #     results['outputs'] = {
@@ -1035,152 +1039,131 @@ def main():
     #   - where outputs will be written
     #   - how aggressive to be with thresholds, coverage, etc.
     ap = argparse.ArgumentParser(description="EDS master processing pipeline")
-    ap.add_argument('--tile', required=True)
-    ap.add_argument('--start-date', required=True, help='YYYYMMDD start')
-    ap.add_argument('--end-date', required=True, help='YYYYMMDD end')
+    ap.add_argument("--tile", required=True)
+    ap.add_argument("--start-date", required=True, help="YYYYMMDD start")
+    ap.add_argument("--end-date", required=True, help="YYYYMMDD end")
     ap.add_argument(
-        '--span-years',
-        type=int,
-        default=2,
-        help='Years of FC baseline to look back'
+        "--span-years", type=int, default=2, help="Years of FC baseline to look back"
     )
     ap.add_argument(
-        '--sr-dir-start',
+        "--sr-dir-start",
         required=False,
-        help='Directory or composite file for start SR date '
-             '(contains *_B2*.tif etc. OR *_srb6/7.tif)'
+        help="Directory or composite file for start SR date "
+        "(contains *_B2*.tif etc. OR *_srb6/7.tif)",
     )
     ap.add_argument(
-        '--sr-dir-end',
+        "--sr-dir-end",
         required=False,
-        help='Directory or composite file for end SR date'
+        help="Directory or composite file for end SR date",
     )
     ap.add_argument(
-        '--sr-root',
-        required=False,
-        help='Root of SR storage (informational)'
+        "--sr-root", required=False, help="Root of SR storage (informational)"
     )
     ap.add_argument(
-        '--fc-root',
-        required=False,
-        help='Root of FC storage (informational)'
+        "--fc-root", required=False, help="Root of FC storage (informational)"
     )
     ap.add_argument(
-        '--fc-glob',
-        help='Override glob for FC inputs (recursive patterns allowed)'
+        "--fc-glob", help="Override glob for FC inputs (recursive patterns allowed)"
     )
+    ap.add_argument("--out-root", default="data/compat/files", help="Base output root")
     ap.add_argument(
-        '--out-root',
-        default='data/compat/files',
-        help='Base output root'
-    )
-    ap.add_argument(
-        '--season-window',
+        "--season-window",
         nargs=2,
-        metavar=('MMDD_START', 'MMDD_END'),
-        help='Override seasonal window for baseline (MMDD MMDD)'
+        metavar=("MMDD_START", "MMDD_END"),
+        help="Override seasonal window for baseline (MMDD MMDD)",
+    )
+    ap.add_argument("--thresholds", nargs="*", type=int, default=DEFAULT_THRESHOLDS)
+    ap.add_argument(
+        "--min-ha", type=float, default=1.0, help="Minimum polygon size in hectares"
     )
     ap.add_argument(
-        '--thresholds',
-        nargs='*',
-        type=int,
-        default=DEFAULT_THRESHOLDS
-    )
-    ap.add_argument(
-        '--min-ha',
-        type=float,
-        default=1.0,
-        help='Minimum polygon size in hectares'
-    )
-    ap.add_argument(
-        '--skinny-pixels',
+        "--skinny-pixels",
         type=int,
         default=3,
-        help='Remove “skinny” artefacts narrower than this many pixels'
+        help="Remove “skinny” artefacts narrower than this many pixels",
     )
     ap.add_argument(
-        '--ratio-presence',
-        nargs='*',
+        "--ratio-presence",
+        nargs="*",
         type=float,
-        help='Optional FC presence ratios for coverage masks'
+        help="Optional FC presence ratios for coverage masks",
     )
     ap.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Print commands but do not actually run them'
+        "--dry-run",
+        action="store_true",
+        help="Print commands but do not actually run them",
     )
     ap.add_argument(
-        '--omit-fpc-start-threshold',
-        action='store_true',
-        help='Disable fpcStart<108 => no-clearing rule in legacy method'
+        "--omit-fpc-start-threshold",
+        action="store_true",
+        help="Disable fpcStart<108 => no-clearing rule in legacy method",
     )
     ap.add_argument(
-        '--lookback-cap',
+        "--lookback-cap",
         type=int,
         default=10,
-        help='Maximum years to look back for FC baseline'
+        help="Maximum years to look back for FC baseline",
     )
     ap.add_argument(
-        '--save-per-input-masks',
-        action='store_true',
-        help='In FC coverage step, save individual input masks as well'
+        "--save-per-input-masks",
+        action="store_true",
+        help="In FC coverage step, save individual input masks as well",
     )
     ap.add_argument(
-        '--fc-only-clr',
-        action='store_true',
-        help='Forward to compat builder: use only *_fc3ms_clr.tif'
+        "--fc-only-clr",
+        action="store_true",
+        help="Forward to compat builder: use only *_fc3ms_clr.tif",
     )
     ap.add_argument(
-        '--sr-only-clr',
-        action='store_true',
-        help='Restrict SR composites to *_nbart6m*_clr.tif or *_srb?_clr.tif where available'
+        "--sr-only-clr",
+        action="store_true",
+        help="Restrict SR composites to *_nbart6m*_clr.tif or *_srb?_clr.tif where available",
     )
     ap.add_argument(
-        '--fc-prefer-clr',
-        action='store_true',
-        help='Forward prefer-clr behaviour (otherwise default prefer)'
+        "--fc-prefer-clr",
+        action="store_true",
+        help="Forward prefer-clr behaviour (otherwise default prefer)",
     )
 
     # FC→FPC conversion controls (used when compat builder needs to derive FPC from FC)
     ap.add_argument(
-        '--fc-convert-to-fpc',
-        action='store_true',
-        help='Convert FC green to FPC in compat build (dc4) using '
-             'FPC=100*(1-exp(-k*FC^n))'
+        "--fc-convert-to-fpc",
+        action="store_true",
+        help="Convert FC green to FPC in compat build (dc4) using "
+        "FPC=100*(1-exp(-k*FC^n))",
     )
     ap.add_argument(
-        '--fc-k',
+        "--fc-k",
         type=float,
         default=0.000435,
-        help='k parameter for FC->FPC conversion (default 0.000435)'
+        help="k parameter for FC->FPC conversion (default 0.000435)",
     )
     ap.add_argument(
-        '--fc-n',
+        "--fc-n",
         type=float,
         default=1.909,
-        help='n parameter for FC->FPC conversion (default 1.909)'
+        help="n parameter for FC->FPC conversion (default 1.909)",
     )
     ap.add_argument(
-        '--fc-nodata',
+        "--fc-nodata",
         type=float,
-        help='Override nodata value for FC inputs; '
-             'defaults to band nodata if present'
+        help="Override nodata value for FC inputs; "
+        "defaults to band nodata if present",
     )
 
     # Runtime environment and packaging options
     ap.add_argument(
-        '--python-exe',
-        help='Override Python executable for subprocess steps '
-             '(use GDAL-enabled env)'
+        "--python-exe",
+        help="Override Python executable for subprocess steps "
+        "(use GDAL-enabled env)",
     )
     ap.add_argument(
-        '--force-compat',
-        action='store_true',
-        help='Force rebuilding compat products even if db8/dc4 already exist'
+        "--force-compat",
+        action="store_true",
+        help="Force rebuilding compat products even if db8/dc4 already exist",
     )
     ap.add_argument(
-        '--package-dest',
-        help='If set, zip scene outputs to this directory at the end'
+        "--package-dest", help="If set, zip scene outputs to this directory at the end"
     )
 
     args = ap.parse_args()
@@ -1208,7 +1191,7 @@ def main():
         # If the user gave an explicit glob, just use that as-is.
         fc_patterns.append(args.fc_glob)
     else:
-        base_root = args.fc_root or ''
+        base_root = args.fc_root or ""
 
         # EASI layout:   <fc_root>/p104r072/fc/...
         scene_dir = os.path.join(base_root, scene, "fc")
@@ -1221,7 +1204,7 @@ def main():
 
         # Legacy “fc3ms” format vs newer “fcm” format
         legacy_pattern = "*fc3ms_clr.tif" if args.fc_only_clr else "*fc3ms*.tif"
-        easi_pattern   = "*fcm*_clr.tif"  if args.fc_only_clr else "*fcm*.tif"
+        easi_pattern = "*fcm*_clr.tif" if args.fc_only_clr else "*fcm*.tif"
 
         for base in (scene_dir, underscore_dir, split_dir):
             for pat in (legacy_pattern, easi_pattern):
@@ -1238,8 +1221,8 @@ def main():
     # We may be given a direct path (file or directory), or just a root.
     # _resolve_sr_input encapsulates the “find nearest composite by date”
     # logic and returns both the chosen path and its effective date.
-    hint_start = args.sr_dir_start or (args.sr_root or args.fc_root or '.')
-    hint_end   = args.sr_dir_end   or (args.sr_root or args.fc_root or '.')
+    hint_start = args.sr_dir_start or (args.sr_root or args.fc_root or ".")
+    hint_end = args.sr_dir_end or (args.sr_root or args.fc_root or ".")
 
     sr_start_path, eff_start = _resolve_sr_input(
         hint_start,
@@ -1284,7 +1267,9 @@ def main():
     if args.season_window:
         # User explicitly specified MMDD_START, MMDD_END → honour it.
         win_start, win_end = args.season_window
-        print(f"[DEBUG] - explicet seasonal window win start: {win_end} win end: {win_end}")
+        print(
+            f"[DEBUG] - explicet seasonal window win start: {win_end} win end: {win_end}"
+        )
     else:
         # Otherwise, build a default window around the effective SR dates:
         #   - 2 months before effective start
@@ -1294,8 +1279,10 @@ def main():
         ws_dt = _shift_months(sd_dt, -2)  # 2 months before start
         we_dt = _shift_months(ed_dt, +2)  # 2 months after end
         win_start = f"{ws_dt.month:02d}{ws_dt.day:02d}"
-        win_end   = f"{we_dt.month:02d}{we_dt.day:02d}"
-        print(f"[DEBUG] - default 2 months seasonality win start: {win_start}, and win end {win_end}")
+        win_end = f"{we_dt.month:02d}{we_dt.day:02d}"
+        print(
+            f"[DEBUG] - default 2 months seasonality win start: {win_start}, and win end {win_end}"
+        )
 
     # Legacy FC lookback years (bounded by lookback_cap)
     lookback = min(args.span_years, args.lookback_cap)
@@ -1309,17 +1296,17 @@ def main():
     #   - seasonal window used
     #   - which steps ran and how long they took
     results = {
-        'tile': args.tile,
-        'scene': scene,
-        'requested_start_date': args.start_date,
-        'requested_end_date': args.end_date,
-        'effective_start_date': eff_start,
-        'effective_end_date': eff_end,
-        'window_start': win_start,
-        'window_end': win_end,
-        'span_years': args.span_years,
-        'lookback_used': lookback,
-        'outputs': {}
+        "tile": args.tile,
+        "scene": scene,
+        "requested_start_date": args.start_date,
+        "requested_end_date": args.end_date,
+        "effective_start_date": eff_start,
+        "effective_end_date": eff_end,
+        "window_start": win_start,
+        "window_end": win_end,
+        "span_years": args.span_years,
+        "lookback_used": lookback,
+        "outputs": {},
     }
 
     # ----------------------------------------------------------------------
@@ -1329,17 +1316,17 @@ def main():
 
     # Expected db8 locations under compat directory
     db8_start_expected = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
-    db8_end_expected   = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
+    db8_end_expected = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
 
     import glob as _glob
+
     dc4_existing = _glob.glob(str(compat_dir / f"lztmre_{scene}_*_dc4mz.img"))
 
     # Decide whether we need to (re)build compat products
-    need_compat = (
-        args.force_compat
-        or (not db8_start_expected.exists()
-            or not db8_end_expected.exists()
-            or len(dc4_existing) < 2)
+    need_compat = args.force_compat or (
+        not db8_start_expected.exists()
+        or not db8_end_expected.exists()
+        or len(dc4_existing) < 2
     )
 
     if need_compat:
@@ -1351,41 +1338,49 @@ def main():
         cmd_compat = [
             pyexe,
             str(compat_script),
-            "--tile", scene,
-            "--out-root", str(compat_dir.parent),  # e.g. /home/jovyan/scratch/eds/compat
-            "--sr-dir", sr_start_path,
-            "--sr-dir", sr_end_path,
-            "--sr-date", eff_start,
-            "--sr-date", eff_end,
+            "--tile",
+            scene,
+            "--out-root",
+            str(compat_dir.parent),  # e.g. /home/jovyan/scratch/eds/compat
+            "--sr-dir",
+            sr_start_path,
+            "--sr-dir",
+            sr_end_path,
+            "--sr-date",
+            eff_start,
+            "--sr-date",
+            eff_end,
         ]
 
         # Add FC patterns as multiple --fc arguments
         for pat in fc_patterns:
-            cmd_compat.extend(['--fc', pat])
+            cmd_compat.extend(["--fc", pat])
 
         # Optional flags to control FC input selection
         if args.fc_only_clr:
-            cmd_compat.append('--fc-only-clr')
+            cmd_compat.append("--fc-only-clr")
         if args.fc_prefer_clr:
-            cmd_compat.append('--fc-prefer-clr')
+            cmd_compat.append("--fc-prefer-clr")
 
         # Optional FC→FPC conversion flags (used when dc4 needs to be derived)
         if args.fc_convert_to_fpc:
-            cmd_compat.append('--fc-convert-to-fpc')
-            cmd_compat.extend(['--fc-k', str(args.fc_k), '--fc-n', str(args.fc_n)])
+            cmd_compat.append("--fc-convert-to-fpc")
+            cmd_compat.extend(["--fc-k", str(args.fc_k), "--fc-n", str(args.fc_n)])
             if args.fc_nodata is not None:
-                cmd_compat.extend(['--fc-nodata', str(args.fc_nodata)])
+                cmd_compat.extend(["--fc-nodata", str(args.fc_nodata)])
 
-        run_cmd(cmd_compat, args.dry_run, 'build_compat', results)
+        run_cmd(cmd_compat, args.dry_run, "build_compat", results)
 
     else:
         # If compat products are already in place and not forcibly rebuilt.
         print("\n[STEP] build_compat")
-        print("Existing compat products detected; skipping build (use --force-compat to rebuild)")
+        print(
+            "Existing compat products detected; skipping build (use --force-compat to rebuild)"
+        )
 
     # Confirm final db8 locations (fall back to current directory if needed)
     db8_start = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
-    db8_end   = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
+    db8_end = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
     if not db8_start.exists():
         db8_start = Path(f"lztmre_{scene}_{eff_start}_db8mz.img")
     if not db8_end.exists():
@@ -1404,21 +1399,30 @@ def main():
     cmd_legacy = [
         pyexe,
         str(legacy_script),
-        '--scene', scene,
-        '--start-date', eff_start,
-        '--end-date', eff_end,
-        '--window-start', win_start,
-        '--window-end', win_end,
-        '--lookback', str(lookback),
-        '--start-db8', str(db8_start),
-        '--end-db8', str(db8_end),
-        '--dc4-glob', dc4_glob,
-        '--verbose',
+        "--scene",
+        scene,
+        "--start-date",
+        eff_start,
+        "--end-date",
+        eff_end,
+        "--window-start",
+        win_start,
+        "--window-end",
+        win_end,
+        "--lookback",
+        str(lookback),
+        "--start-db8",
+        str(db8_start),
+        "--end-db8",
+        str(db8_end),
+        "--dc4-glob",
+        dc4_glob,
+        "--verbose",
     ]
     if args.omit_fpc_start_threshold:
-        cmd_legacy.append('--omit-fpc-start-threshold')
+        cmd_legacy.append("--omit-fpc-start-threshold")
 
-    run_cmd(cmd_legacy, args.dry_run, 'legacy_method', results)
+    run_cmd(cmd_legacy, args.dry_run, "legacy_method", results)
 
     # Expected DLL/DLJ outputs
     dll = compat_dir / f"lztmre_{scene}_d{eff_start}{eff_end}_dllmz.img"
@@ -1437,8 +1441,10 @@ def main():
     cmd_style = [
         pyexe,
         str(style_script),
-        "--dll", str(dll),
-        "--dlj", str(dlj),
+        "--dll",
+        str(dll),
+        "--dlj",
+        str(dlj),
     ]
     run_cmd(cmd_style, args.dry_run, "style_outputs", results)
 
@@ -1449,42 +1455,53 @@ def main():
     shp_base = compat_dir / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha"
     shp_base.mkdir(parents=True, exist_ok=True)
 
-    poly_script = Path(__file__).resolve().parent / "easi_polygonize_merged_thresholds.py"
+    poly_script = (
+        Path(__file__).resolve().parent / "easi_polygonize_merged_thresholds.py"
+    )
 
     cmd_poly = [
         pyexe,
         str(poly_script),
-        '--dll', str(dll),
-        '--out-dir', str(shp_base),
-        '--min-ha', str(args.min_ha),
-        '--thresholds',
+        "--dll",
+        str(dll),
+        "--out-dir",
+        str(shp_base),
+        "--min-ha",
+        str(args.min_ha),
+        "--thresholds",
         *[str(t) for t in args.thresholds],
     ]
-    run_cmd(cmd_poly, args.dry_run, 'polygonize_thresholds', results)
+    run_cmd(cmd_poly, args.dry_run, "polygonize_thresholds", results)
 
     # ----------------------------------------------------------------------
     # 11. Step 5: Vector post-processing (clean up polygons)
     # ----------------------------------------------------------------------
     # Dissolve overlapping polygons and remove narrow “spaghetti” artefacts.
-    shp_clean = compat_dir / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean"
+    shp_clean = (
+        compat_dir / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean"
+    )
 
     post_script = Path(__file__).resolve().parent / "easi_vector_postprocess.py"
 
     cmd_post = [
         pyexe,
         str(post_script),
-        "--input-dir", str(shp_base),
-        "--out-dir", str(shp_clean),
+        "--input-dir",
+        str(shp_base),
+        "--out-dir",
+        str(shp_clean),
         "--dissolve",
-        "--skinny-pixels", str(args.skinny_pixels),
-        "--from-raster", str(dll),
+        "--skinny-pixels",
+        str(args.skinny_pixels),
+        "--from-raster",
+        str(dll),
     ]
     run_cmd(cmd_post, args.dry_run, "vector_postprocess", results)
 
     # ----------------------------------------------------------------------
     # 12. Step 6: FC coverage masks (extent / ratio presence)
     # ----------------------------------------------------------------------
-    fc_cov_dir = compat_dir / 'fc_coverage'
+    fc_cov_dir = compat_dir / "fc_coverage"
     fc_cov_dir.mkdir(parents=True, exist_ok=True)
 
     cov_script = Path(__file__).resolve().parent / "easi_fc_coverage_extent.py"
@@ -1492,10 +1509,14 @@ def main():
     cmd_cov = [
         pyexe,
         str(cov_script),
-        "--fc-dir", str(compat_dir),
-        "--scene", scene,
-        "--pattern", "*_dc4mz.img",
-        "--out-dir", str(fc_cov_dir),
+        "--fc-dir",
+        str(compat_dir),
+        "--scene",
+        scene,
+        "--pattern",
+        "*_dc4mz.img",
+        "--out-dir",
+        str(fc_cov_dir),
     ]
     if args.ratio_presence:
         cmd_cov.append("--ratios")
@@ -1513,28 +1534,40 @@ def main():
     # Strict coverage polygon
     strict_shp = fc_cov_dir / f"{scene}_fc_consistent.shp"
     if strict_shp.exists():
-        clipped_strict = compat_dir / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_strict"
+        clipped_strict = (
+            compat_dir
+            / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_strict"
+        )
         clipped_strict.mkdir(parents=True, exist_ok=True)
         cmd_clip_strict = [
             pyexe,
             str(clip_script),
-            "--input-dir", str(shp_clean),
-            "--clip", str(strict_shp),
-            "--out-dir", str(clipped_strict),
+            "--input-dir",
+            str(shp_clean),
+            "--clip",
+            str(strict_shp),
+            "--out-dir",
+            str(clipped_strict),
         ]
         run_cmd(cmd_clip_strict, args.dry_run, "clip_strict", results)
 
     # Ratio coverage polygon/mask
     ratio_mask = fc_cov_dir / f"{scene}_fc_consistent_mask.shp"
     if ratio_mask.exists():
-        clipped_ratio = compat_dir / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_ratio"
+        clipped_ratio = (
+            compat_dir
+            / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_ratio"
+        )
         clipped_ratio.mkdir(parents=True, exist_ok=True)
         cmd_clip_ratio = [
             pyexe,
             str(clip_script),
-            "--input-dir", str(shp_clean),
-            "--clip", str(ratio_mask),
-            "--out-dir", str(clipped_ratio),
+            "--input-dir",
+            str(shp_clean),
+            "--clip",
+            str(ratio_mask),
+            "--out-dir",
+            str(clipped_ratio),
         ]
         run_cmd(cmd_clip_ratio, args.dry_run, "clip_ratio", results)
 
@@ -1548,28 +1581,33 @@ def main():
         cmd_pkg = [
             pyexe,
             str(pkg_script),
-            "--compat-dir", str(compat_dir),
-            "--scene", scene,
-            "--start-date", eff_start,
-            "--end-date", eff_end,
-            "--dest-dir", args.package_dest,
+            "--compat-dir",
+            str(compat_dir),
+            "--scene",
+            scene,
+            "--start-date",
+            eff_start,
+            "--end-date",
+            eff_end,
+            "--dest-dir",
+            args.package_dest,
         ]
         run_cmd(cmd_pkg, args.dry_run, "package_outputs", results)
 
     # ----------------------------------------------------------------------
     # 15. Final summary
     # ----------------------------------------------------------------------
-    results['outputs'] = {
-        'dll': str(dll),
-        'dlj': str(dlj),
-        'threshold_polygons_dir': str(shp_base),
-        'clean_polygons_dir': str(shp_clean),
-        'fc_coverage_dir': str(fc_cov_dir),
+    results["outputs"] = {
+        "dll": str(dll),
+        "dlj": str(dlj),
+        "threshold_polygons_dir": str(shp_base),
+        "clean_polygons_dir": str(shp_clean),
+        "fc_coverage_dir": str(fc_cov_dir),
     }
 
     print("\n=== EDS MASTER PIPELINE COMPLETE ===")
     print(json.dumps(results, indent=2))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

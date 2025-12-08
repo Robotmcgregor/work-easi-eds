@@ -36,12 +36,12 @@ def style_dll(dll_path: str) -> None:
 
     # Stronger colours for standard SLATS-style thresholds (34–39)
     palette = {
-        34: (255, 255, 0, 255),   # yellow
-        35: (255, 200, 0, 255),   # orange-yellow
-        36: (255, 150, 0, 255),   # orange
-        37: (255, 100, 0, 255),   # deep orange
-        38: (255, 0, 0, 255),     # red
-        39: (180, 0, 0, 255),     # dark red
+        34: (255, 255, 0, 255),  # yellow
+        35: (255, 200, 0, 255),  # orange-yellow
+        36: (255, 150, 0, 255),  # orange
+        37: (255, 100, 0, 255),  # deep orange
+        38: (255, 0, 0, 255),  # red
+        39: (180, 0, 0, 255),  # dark red
     }
     for k, rgba in palette.items():
         ct.SetColorEntry(k, rgba)
@@ -64,9 +64,9 @@ def style_dlj(dlj_path: str) -> None:
         raise RuntimeError(f"Cannot open DLJ: {dlj_path}")
 
     names = [
-        "mean_change",           # band 1
-        "spectral_test",         # band 2
-        "combined_index",        # band 3
+        "mean_change",  # band 1
+        "spectral_test",  # band 2
+        "combined_index",  # band 3
         "clearing_probability",  # band 4
     ]
 
@@ -81,8 +81,12 @@ def style_dlj(dlj_path: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Style DLL/DLJ outputs")
-    ap.add_argument("--dll", required=True, help="Path to DLL raster (lztmre_*_dllmz.img)")
-    ap.add_argument("--dlj", required=True, help="Path to DLJ raster (lztmre_*_dljmz.img)")
+    ap.add_argument(
+        "--dll", required=True, help="Path to DLL raster (lztmre_*_dllmz.img)"
+    )
+    ap.add_argument(
+        "--dlj", required=True, help="Path to DLJ raster (lztmre_*_dljmz.img)"
+    )
     args = ap.parse_args()
 
     style_dll(args.dll)

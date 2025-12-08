@@ -32,8 +32,9 @@ def make_zip_name(scene: str, start: str | None, end: str | None) -> str:
         return f"{scene}_eds_outputs_{stamp}.zip"
 
 
-def package_compat(compat_dir: Path, dest_dir: Path, scene: str,
-                   start: str | None, end: str | None) -> Path:
+def package_compat(
+    compat_dir: Path, dest_dir: Path, scene: str, start: str | None, end: str | None
+) -> Path:
     compat_dir = compat_dir.resolve()
     dest_dir = dest_dir.resolve()
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -52,8 +53,10 @@ def package_compat(compat_dir: Path, dest_dir: Path, scene: str,
                 files.append(full)
                 total_bytes += full.stat().st_size
 
-    print(f"[INFO] Packaging {len(files)} files "
-          f"({total_bytes/1e9:.2f} GB) from {compat_dir}")
+    print(
+        f"[INFO] Packaging {len(files)} files "
+        f"({total_bytes/1e9:.2f} GB) from {compat_dir}"
+    )
 
     if not files:
         print("[WARN] No files found under compat dir – ZIP will be empty.")
@@ -77,15 +80,28 @@ def package_compat(compat_dir: Path, dest_dir: Path, scene: str,
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Package EDS compat outputs into a ZIP archive.")
-    ap.add_argument("--compat-dir", required=True,
-                    help="Scene compat directory (e.g. /home/jovyan/scratch/eds/compat/p104r072)")
-    ap.add_argument("--scene", required=True,
-                    help="Scene code (e.g. p104r072) used in the ZIP filename")
-    ap.add_argument("--start-date", help="Effective start date YYYYMMDD (for naming only)")
+    ap = argparse.ArgumentParser(
+        description="Package EDS compat outputs into a ZIP archive."
+    )
+    ap.add_argument(
+        "--compat-dir",
+        required=True,
+        help="Scene compat directory (e.g. /home/jovyan/scratch/eds/compat/p104r072)",
+    )
+    ap.add_argument(
+        "--scene",
+        required=True,
+        help="Scene code (e.g. p104r072) used in the ZIP filename",
+    )
+    ap.add_argument(
+        "--start-date", help="Effective start date YYYYMMDD (for naming only)"
+    )
     ap.add_argument("--end-date", help="Effective end date YYYYMMDD (for naming only)")
-    ap.add_argument("--dest-dir", required=True,
-                    help="Destination directory for the ZIP (e.g. your working drive)")
+    ap.add_argument(
+        "--dest-dir",
+        required=True,
+        help="Destination directory for the ZIP (e.g. your working drive)",
+    )
     args = ap.parse_args(argv)
 
     compat_dir = Path(args.compat_dir)

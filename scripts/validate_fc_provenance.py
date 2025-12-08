@@ -34,7 +34,13 @@ SR_COLLECTIONS = ["ga_ls9c_ard_3", "ga_ls8c_ard_3"]
 WORLD_BBOX = [-180.0, -90.0, 180.0, 90.0]
 
 
-def build_stac_search_url(base_url: str, collection: str, bbox: List[float], time_range: str, limit: int = 2000) -> str:
+def build_stac_search_url(
+    base_url: str,
+    collection: str,
+    bbox: List[float],
+    time_range: str,
+    limit: int = 2000,
+) -> str:
     bbox_s = ",".join(str(x) for x in bbox)
     return (
         f"{base_url.rstrip('/')}/search?collection={collection}"
@@ -61,7 +67,7 @@ def parse_iso_date(s: str) -> Optional[str]:
     try:
         if len(s) == 8 and s.isdigit():
             return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
-        if len(s) == 10 and s[4] == '-' and s[7] == '-':
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
             return s
     except Exception:
         pass
@@ -69,7 +75,9 @@ def parse_iso_date(s: str) -> Optional[str]:
 
 
 @lru_cache(maxsize=4096)
-def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days: int = 7) -> Optional[str]:
+def resolve_fc_platform_for_tile_date(
+    path: str, row: str, ymd: str, search_days: int = 7
+) -> Optional[str]:
     iso = parse_iso_date(ymd)
     if not iso:
         return None
@@ -78,7 +86,9 @@ def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days
     data = None
     for base in DEA_STAC_ROOTS:
         try:
-            url = build_stac_search_url(base, FC_COLLECTION, WORLD_BBOX, time_range, limit=2000)
+            url = build_stac_search_url(
+                base, FC_COLLECTION, WORLD_BBOX, time_range, limit=2000
+            )
             with urllib.request.urlopen(url) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             break
@@ -97,6 +107,7 @@ def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days
     # Fallback to SR-based inference within ±search_days
     try:
         from datetime import datetime, timedelta
+
         d0 = datetime.strptime(date_str, "%Y-%m-%d")
         start = (d0 - timedelta(days=search_days)).strftime("%Y-%m-%d")
         end = (d0 + timedelta(days=search_days)).strftime("%Y-%m-%d")
@@ -110,7 +121,9 @@ def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days
             data_sr = None
             for base in DEA_STAC_ROOTS:
                 try:
-                    url_sr = build_stac_search_url(base, coll, WORLD_BBOX, time_range_sr, limit=2000)
+                    url_sr = build_stac_search_url(
+                        base, coll, WORLD_BBOX, time_range_sr, limit=2000
+                    )
                     with urllib.request.urlopen(url_sr) as resp:
                         data_sr = json.loads(resp.read().decode("utf-8"))
                     break
@@ -150,17 +163,24 @@ def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days
 
 
 def extract_platform_from_metadata(tif_path: Path) -> Optional[str]:
-    """Try to extract platform from GeoTIFF metadata tags, return 'landsat-8'/'landsat-9' or None.
-    """
+    """Try to extract platform from GeoTIFF metadata tags, return 'landsat-8'/'landsat-9' or None."""
     try:
         import rasterio
+
         with rasterio.open(tif_path) as ds:
             tags = ds.tags() or {}
             # Common keys we might encounter
             keys = [
-                "platform", "satellite", "mission", "SPACECRAFT_NAME",
-                "landsat:platform", "landsat:mission", "sensor",
-                "INSTRUMENT", "SENSOR_ID", "SPACECRAFT_ID",
+                "platform",
+                "satellite",
+                "mission",
+                "SPACECRAFT_NAME",
+                "landsat:platform",
+                "landsat:mission",
+                "sensor",
+                "INSTRUMENT",
+                "SENSOR_ID",
+                "SPACECRAFT_ID",
             ]
             vals = []
             for k in keys:
@@ -170,12 +190,27 @@ def extract_platform_from_metadata(tif_path: Path) -> Optional[str]:
             comb = " ".join(vals)
             if not comb:
                 return None
-            if "landsat-9" in comb or "landsat 9" in comb or "ls9" in comb or "oli-2" in comb:
+            if (
+                "landsat-9" in comb
+                or "landsat 9" in comb
+                or "ls9" in comb
+                or "oli-2" in comb
+            ):
                 return "landsat-9"
-            if "landsat-8" in comb or "landsat 8" in comb or "ls8" in comb or "oli" in comb:
+            if (
+                "landsat-8" in comb
+                or "landsat 8" in comb
+                or "ls8" in comb
+                or "oli" in comb
+            ):
                 return "landsat-8"
             # Explicit L7/L5 identification if present
-            if "landsat-7" in comb or "landsat 7" in comb or "etm+" in comb or "etm" in comb:
+            if (
+                "landsat-7" in comb
+                or "landsat 7" in comb
+                or "etm+" in comb
+                or "etm" in comb
+            ):
                 return "landsat-7"
             if "landsat-5" in comb or "landsat 5" in comb or "tm" in comb:
                 return "landsat-5"
@@ -184,12 +219,15 @@ def extract_platform_from_metadata(tif_path: Path) -> Optional[str]:
     return None
 
 
-def infer_platform_from_local_sr(tile_dir: Path, path: str, row: str, ymd: str, search_days: int = 7) -> Optional[str]:
+def infer_platform_from_local_sr(
+    tile_dir: Path, path: str, row: str, ymd: str, search_days: int = 7
+) -> Optional[str]:
     """Offline fallback: look for local SR files (ga_ls8c_ard_/ga_ls9c_ard_) near the date within ±N days.
     Return 'landsat-8'/'landsat-9' or None.
     """
     try:
         from datetime import datetime, timedelta
+
         target = datetime.strptime(ymd, "%Y%m%d")
         # Search recursively under tile for SR files with same pathrow and nearby dates
         pr = f"{path}{row}"
@@ -231,7 +269,9 @@ def parse_fc_filename(name: str) -> Optional[Tuple[str, str, str, bool]]:
     # Supports both fc3ms and fc3ms_clr names
     # ga_ls_fc_094076_20240819_fc3ms.tif
     # ga_ls_fc_094076_20240819_fc3ms_clr.tif
-    m = re.match(r"^ga_ls_fc_(\d{3})(\d{3})_(\d{8})_fc3ms(_clr)?\.tif$", name, re.IGNORECASE)
+    m = re.match(
+        r"^ga_ls_fc_(\d{3})(\d{3})_(\d{8})_fc3ms(_clr)?\.tif$", name, re.IGNORECASE
+    )
     if not m:
         return None
     path, row, ymd, clr = m.group(1), m.group(2), m.group(3), bool(m.group(4))
@@ -241,14 +281,30 @@ def parse_fc_filename(name: str) -> Optional[Tuple[str, str, str, bool]]:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Validate FC provenance (LS8/LS9-only)")
     ap.add_argument("--tile", required=True, help="PPP_RRR, e.g., 094_076")
-    ap.add_argument("--root", default=r"D:\\data\\lsat", help="Root dir containing tile folder")
+    ap.add_argument(
+        "--root", default=r"D:\\data\\lsat", help="Root dir containing tile folder"
+    )
     ap.add_argument("--out", help="Optional CSV report path")
-    ap.add_argument("--action", choices=["report", "move", "delete"], default="report",
-                    help="What to do with non-LS8/LS9 items (default report)")
-    ap.add_argument("--quarantine-dir", default="_quarantine",
-                    help="Folder name under tile to move non-LS8/9 files when --action move")
-    ap.add_argument("--search-days", type=int, default=7, help="SR fallback window in days (default 7)")
-    ap.add_argument("--limit", type=int, default=None, help="Optional cap on files to check")
+    ap.add_argument(
+        "--action",
+        choices=["report", "move", "delete"],
+        default="report",
+        help="What to do with non-LS8/LS9 items (default report)",
+    )
+    ap.add_argument(
+        "--quarantine-dir",
+        default="_quarantine",
+        help="Folder name under tile to move non-LS8/9 files when --action move",
+    )
+    ap.add_argument(
+        "--search-days",
+        type=int,
+        default=7,
+        help="SR fallback window in days (default 7)",
+    )
+    ap.add_argument(
+        "--limit", type=int, default=None, help="Optional cap on files to check"
+    )
 
     args = ap.parse_args(argv)
 
@@ -275,23 +331,29 @@ def main(argv=None) -> int:
             continue
         path, row, ymd, is_clr = info
         # 1) Try STAC FC + SR fallback
-        plat = resolve_fc_platform_for_tile_date(path, row, ymd, search_days=args.search_days)
+        plat = resolve_fc_platform_for_tile_date(
+            path, row, ymd, search_days=args.search_days
+        )
         # 2) Try GeoTIFF metadata if still unknown
         if not plat:
             plat = extract_platform_from_metadata(p)
         # 3) Try local SR presence if still unknown
         if not plat:
-            plat = infer_platform_from_local_sr(tile_dir, path, row, ymd, search_days=args.search_days)
+            plat = infer_platform_from_local_sr(
+                tile_dir, path, row, ymd, search_days=args.search_days
+            )
         status = "OK" if plat in ("landsat-8", "landsat-9") else "NON-LS8-9"
-        rows.append({
-            "tile": args.tile,
-            "pathrow": f"{path}{row}",
-            "date": ymd,
-            "filename": p.name,
-            "platform": plat or "unknown",
-            "status": status,
-            "fullpath": str(p),
-        })
+        rows.append(
+            {
+                "tile": args.tile,
+                "pathrow": f"{path}{row}",
+                "date": ymd,
+                "filename": p.name,
+                "platform": plat or "unknown",
+                "status": status,
+                "fullpath": str(p),
+            }
+        )
         if status != "OK" and not is_clr:
             # Only operate on base fc3ms; leave clr variants paired
             bad.append(p)
@@ -322,7 +384,18 @@ def main(argv=None) -> int:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         with out.open("w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=["tile", "pathrow", "date", "filename", "platform", "status", "fullpath"])
+            w = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "tile",
+                    "pathrow",
+                    "date",
+                    "filename",
+                    "platform",
+                    "status",
+                    "fullpath",
+                ],
+            )
             w.writeheader()
             for r in rows:
                 w.writerow(r)

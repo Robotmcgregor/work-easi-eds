@@ -28,7 +28,11 @@ gdal.UseExceptions()
 
 def parse_scene_era(path: str) -> tuple[str, str]:
     base = os.path.basename(path)
-    m = re.match(r"lztmre_(p\d{3}r\d{3})_(d\d{8}\d{8}|e\d+)_dllmz\.img$", base, flags=re.IGNORECASE)
+    m = re.match(
+        r"lztmre_(p\d{3}r\d{3})_(d\d{8}\d{8}|e\d+)_dllmz\.img$",
+        base,
+        flags=re.IGNORECASE,
+    )
     if not m:
         # fallback generic
         stem = os.path.splitext(base)[0]
@@ -36,7 +40,9 @@ def parse_scene_era(path: str) -> tuple[str, str]:
     return m.group(1).lower(), m.group(2).lower()
 
 
-def _get_pixel_area_m2(gt: Tuple[float, float, float, float, float, float]) -> Optional[float]:
+def _get_pixel_area_m2(
+    gt: Tuple[float, float, float, float, float, float],
+) -> Optional[float]:
     """Return pixel area in m^2 if geotransform suggests planar meters (no rotation)."""
     px_w = abs(gt[1])
     px_h = abs(gt[5])
@@ -50,7 +56,9 @@ def _needs_reproject_for_area(srs: osr.SpatialReference) -> bool:
     return srs.IsGeographic() == 1
 
 
-def polygonize_class(arr: np.ndarray, c: int, gt, wkt, out_path: Path, min_ha: Optional[float]=None) -> tuple[int, int]:
+def polygonize_class(
+    arr: np.ndarray, c: int, gt, wkt, out_path: Path, min_ha: Optional[float] = None
+) -> tuple[int, int]:
     """Polygonize a single class value.
 
     Returns (kept_features, original_features).
@@ -61,34 +69,37 @@ def polygonize_class(arr: np.ndarray, c: int, gt, wkt, out_path: Path, min_ha: O
     if mask.sum() == 0:
         return 0, 0
 
-    mem = gdal.GetDriverByName('MEM')
-    ds_val = mem.Create('', xsize, ysize, 1, gdal.GDT_Byte)
+    mem = gdal.GetDriverByName("MEM")
+    ds_val = mem.Create("", xsize, ysize, 1, gdal.GDT_Byte)
     ds_val.SetGeoTransform(gt)
     ds_val.SetProjection(wkt)
     band = ds_val.GetRasterBand(1)
     band.WriteArray(mask * c)
 
-    ds_msk = mem.Create('', xsize, ysize, 1, gdal.GDT_Byte)
+    ds_msk = mem.Create("", xsize, ysize, 1, gdal.GDT_Byte)
     ds_msk.GetRasterBand(1).WriteArray(mask)
 
     # Vectorize into memory first
-    vdrv_mem = ogr.GetDriverByName('Memory')
-    mem_ds = vdrv_mem.CreateDataSource('')
-    srs = osr.SpatialReference(); srs.ImportFromWkt(wkt)
-    mem_lyr = mem_ds.CreateLayer('tmp', srs=srs, geom_type=ogr.wkbPolygon)
-    mem_lyr.CreateField(ogr.FieldDefn('class', ogr.OFTInteger))
-    gdal.Polygonize(ds_val.GetRasterBand(1), ds_msk.GetRasterBand(1), mem_lyr, 0, [], callback=None)
+    vdrv_mem = ogr.GetDriverByName("Memory")
+    mem_ds = vdrv_mem.CreateDataSource("")
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(wkt)
+    mem_lyr = mem_ds.CreateLayer("tmp", srs=srs, geom_type=ogr.wkbPolygon)
+    mem_lyr.CreateField(ogr.FieldDefn("class", ogr.OFTInteger))
+    gdal.Polygonize(
+        ds_val.GetRasterBand(1), ds_msk.GetRasterBand(1), mem_lyr, 0, [], callback=None
+    )
     orig_count = mem_lyr.GetFeatureCount()
 
     # Prepare output
-    drv = ogr.GetDriverByName('ESRI Shapefile')
+    drv = ogr.GetDriverByName("ESRI Shapefile")
     if out_path.exists():
         drv.DeleteDataSource(str(out_path))
     out_ds = drv.CreateDataSource(str(out_path))
-    out_lyr = out_ds.CreateLayer('polygons', srs=srs, geom_type=ogr.wkbPolygon)
-    out_lyr.CreateField(ogr.FieldDefn('class', ogr.OFTInteger))
-    out_lyr.CreateField(ogr.FieldDefn('area_m2', ogr.OFTReal))
-    out_lyr.CreateField(ogr.FieldDefn('area_ha', ogr.OFTReal))
+    out_lyr = out_ds.CreateLayer("polygons", srs=srs, geom_type=ogr.wkbPolygon)
+    out_lyr.CreateField(ogr.FieldDefn("class", ogr.OFTInteger))
+    out_lyr.CreateField(ogr.FieldDefn("area_m2", ogr.OFTReal))
+    out_lyr.CreateField(ogr.FieldDefn("area_ha", ogr.OFTReal))
 
     # Area computation setup
     pixel_area = _get_pixel_area_m2(gt)
@@ -96,7 +107,8 @@ def polygonize_class(arr: np.ndarray, c: int, gt, wkt, out_path: Path, min_ha: O
     reproj_ct = None
     if needs_reproj:
         # Use Australian Albers (EPSG:3577) for area measurement if geographic.
-        target = osr.SpatialReference(); target.ImportFromEPSG(3577)
+        target = osr.SpatialReference()
+        target.ImportFromEPSG(3577)
         reproj_ct = osr.CoordinateTransformation(srs, target)
 
     kept = 0
@@ -121,9 +133,9 @@ def polygonize_class(arr: np.ndarray, c: int, gt, wkt, out_path: Path, min_ha: O
             continue
         # Write filtered feature
         out_feat = ogr.Feature(out_lyr.GetLayerDefn())
-        out_feat.SetField('class', c)
-        out_feat.SetField('area_m2', float(area_m2))
-        out_feat.SetField('area_ha', float(area_ha))
+        out_feat.SetField("class", c)
+        out_feat.SetField("area_m2", float(area_m2))
+        out_feat.SetField("area_ha", float(area_ha))
         out_feat.SetGeometry(geom.Clone())
         out_lyr.CreateFeature(out_feat)
         out_feat = None
@@ -137,17 +149,29 @@ def polygonize_class(arr: np.ndarray, c: int, gt, wkt, out_path: Path, min_ha: O
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description='Polygonize dllmz per class to distinct shapefiles (optionally apply min area filter).')
-    ap.add_argument('--dll', required=True, help='Path to *_dllmz.img')
-    ap.add_argument('--classes', nargs='*', type=int, help='Class values to extract. Default: all >0 in raster')
-    ap.add_argument('--out-dir', required=True, help='Output directory for shapefiles')
-    ap.add_argument('--min-ha', type=float, default=None, help='Minimum polygon area (hectares) to keep. Filters small noisy polygons.')
+    ap = argparse.ArgumentParser(
+        description="Polygonize dllmz per class to distinct shapefiles (optionally apply min area filter)."
+    )
+    ap.add_argument("--dll", required=True, help="Path to *_dllmz.img")
+    ap.add_argument(
+        "--classes",
+        nargs="*",
+        type=int,
+        help="Class values to extract. Default: all >0 in raster",
+    )
+    ap.add_argument("--out-dir", required=True, help="Output directory for shapefiles")
+    ap.add_argument(
+        "--min-ha",
+        type=float,
+        default=None,
+        help="Minimum polygon area (hectares) to keep. Filters small noisy polygons.",
+    )
     args = ap.parse_args(argv)
 
     print(f"[INFO] Opening raster: {args.dll}")
     ds = gdal.Open(args.dll, gdal.GA_ReadOnly)
     if ds is None:
-        raise SystemExit(f'Cannot open {args.dll}')
+        raise SystemExit(f"Cannot open {args.dll}")
     band = ds.GetRasterBand(1)
     gt = ds.GetGeoTransform()
     wkt = ds.GetProjection()
@@ -173,12 +197,16 @@ def main(argv=None) -> int:
         out_path = out_dir / shp_name
         print(f"[INFO] Polygonizing class {c} (min_ha={args.min_ha}) -> {out_path}")
         kept, orig = polygonize_class(arr, c, gt, wkt, out_path, min_ha=args.min_ha)
-        print(f"[OK] {shp_name}: {kept} features kept (original {orig}, removed {orig - kept})")
+        print(
+            f"[OK] {shp_name}: {kept} features kept (original {orig}, removed {orig - kept})"
+        )
         total += kept
 
-    print(f"[DONE] Wrote shapefiles for {len(classes)} classes to: {out_dir}. Total kept features: {total}")
+    print(
+        f"[DONE] Wrote shapefiles for {len(classes)} classes to: {out_dir}. Total kept features: {total}"
+    )
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

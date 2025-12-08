@@ -27,7 +27,9 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 
-def upload_zip_to_s3(zip_path: Path, bucket_name: str, prefix: str, region: str = "ap-southeast-2") -> str:
+def upload_zip_to_s3(
+    zip_path: Path, bucket_name: str, prefix: str, region: str = "ap-southeast-2"
+) -> str:
     """Upload the zip file to s3://bucket/prefix/filename and return the S3 key."""
     zip_path = zip_path.resolve()
     if not zip_path.exists():
@@ -59,7 +61,9 @@ def upload_zip_to_s3(zip_path: Path, bucket_name: str, prefix: str, region: str 
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Upload an EDS outputs ZIP to an S3 bucket.")
+    ap = argparse.ArgumentParser(
+        description="Upload an EDS outputs ZIP to an S3 bucket."
+    )
     ap.add_argument(
         "--zip-path",
         required=True,

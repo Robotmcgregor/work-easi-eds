@@ -50,15 +50,15 @@ from rios import applier
 # Preset → codes + suffix
 # -----------------------
 PRESETS = {
-    "no":   {"keep": None,       "suffix": ""},        # no-op
-    "clr":  {"keep": [1],        "suffix": "_clr"},
-    "cw":   {"keep": [1, 5],     "suffix": "_cw"},
-    "cws":  {"keep": [1, 5, 3],  "suffix": "_cws"},
-    "cld":  {"keep": [2],        "suffix": "_cld"},
-    "shd":  {"keep": [3],        "suffix": "_shd"},
-    "snow": {"keep": [4],        "suffix": "_snow"},
-    "water":{"keep": [5],        "suffix": "_water"},
-    "custom":{"keep": None,      "suffix": None},      # set from --mask-keep
+    "no": {"keep": None, "suffix": ""},  # no-op
+    "clr": {"keep": [1], "suffix": "_clr"},
+    "cw": {"keep": [1, 5], "suffix": "_cw"},
+    "cws": {"keep": [1, 5, 3], "suffix": "_cws"},
+    "cld": {"keep": [2], "suffix": "_cld"},
+    "shd": {"keep": [3], "suffix": "_shd"},
+    "snow": {"keep": [4], "suffix": "_snow"},
+    "water": {"keep": [5], "suffix": "_water"},
+    "custom": {"keep": None, "suffix": None},  # set from --mask-keep
 }
 
 # -----------------------
@@ -66,51 +66,78 @@ PRESETS = {
 # -----------------------
 # Key = (pathrow, yyyymmdd)
 # ---- Key = (pathrow, yyyymmdd); accept YYYYMMDD or YYYY-MM-DD, followed by "_" or "." or end
-RE_KEY = re.compile(r'_(?P<pathrow>\d{6})_(?P<date>(?:\d{8}|\d{4}-\d{2}-\d{2}))(?=_|\.|$)', re.IGNORECASE)
-
-RE_SR  = re.compile(
-    r'^(?P<sens>ga_ls\d+c)(?:_ard)?_(?P<pr>\d{6})_(?P<ymd>\d{8})_(?:final_)?(?:sr6b|srb6|sr7b|srb7)\.tif$',
-    re.IGNORECASE
+RE_KEY = re.compile(
+    r"_(?P<pathrow>\d{6})_(?P<date>(?:\d{8}|\d{4}-\d{2}-\d{2}))(?=_|\.|$)",
+    re.IGNORECASE,
 )
 
-RE_FM  = re.compile(
-    r'^(?P<sens>ga_ls\d+c)(?:_ard)?_(?P<pr>\d{6})_(?P<ymd>\d{8})_(?:final_)?fmask\.tif$',
-    re.IGNORECASE
+RE_SR = re.compile(
+    r"^(?P<sens>ga_ls\d+c)(?:_ard)?_(?P<pr>\d{6})_(?P<ymd>\d{8})_(?:final_)?(?:sr6b|srb6|sr7b|srb7)\.tif$",
+    re.IGNORECASE,
+)
+
+RE_FM = re.compile(
+    r"^(?P<sens>ga_ls\d+c)(?:_ard)?_(?P<pr>\d{6})_(?P<ymd>\d{8})_(?:final_)?fmask\.tif$",
+    re.IGNORECASE,
 )
 
 # ---- File recognisers (names only; folder is arbitrary)
 
 # FC: ga_ls_fc_089080_20220615_fc3ms.tif  (your renamed FC product)
-RE_FC  = re.compile(
-    r'^ga_ls_fc_(?P<pr>\d{6})_(?P<ymd>\d{8})_fc3ms\.tif$',
-    re.IGNORECASE
-)
-
-
+RE_FC = re.compile(r"^ga_ls_fc_(?P<pr>\d{6})_(?P<ymd>\d{8})_fc3ms\.tif$", re.IGNORECASE)
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Apply FMASK to SR/FC products with RIOS (batch).")
+    p = argparse.ArgumentParser(
+        description="Apply FMASK to SR/FC products with RIOS (batch)."
+    )
     p.add_argument("--dir", required=True, help="Root directory to scan")
-    p.add_argument("--mode", choices=["fc", "sr", "both"], default="both",
-                   help="Which products to process (default: both)")
-    p.add_argument("--include-nonleaf", action="store_true",
-                   help="Scan ALL directories (default: leaf/bottom-only).")
+    p.add_argument(
+        "--mode",
+        choices=["fc", "sr", "both"],
+        default="both",
+        help="Which products to process (default: both)",
+    )
+    p.add_argument(
+        "--include-nonleaf",
+        action="store_true",
+        help="Scan ALL directories (default: leaf/bottom-only).",
+    )
 
     # Masking
-    p.add_argument("--preset", choices=list(PRESETS.keys()), default="clr",
-                   help="Mask preset (default: clr). 'no' = no-op.")
-    p.add_argument("--mask-keep", nargs="*", type=int, default=None,
-                   help="Codes to keep for preset=custom (e.g. --mask-keep 1 3 5).")
+    p.add_argument(
+        "--preset",
+        choices=list(PRESETS.keys()),
+        default="clr",
+        help="Mask preset (default: clr). 'no' = no-op.",
+    )
+    p.add_argument(
+        "--mask-keep",
+        nargs="*",
+        type=int,
+        default=None,
+        help="Codes to keep for preset=custom (e.g. --mask-keep 1 3 5).",
+    )
 
     # Safety & behaviour
-    p.add_argument("--dry-run", action="store_true", help="Preview only (default if --do-write not set).")
-    p.add_argument("--do-write", action="store_true", help="Actually write masked outputs.")
-    p.add_argument("--on-exists", choices=["skip", "overwrite", "suffix"], default="skip",
-                   help="If output exists: skip (default), overwrite, or add '__new' suffix.")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview only (default if --do-write not set).",
+    )
+    p.add_argument(
+        "--do-write", action="store_true", help="Actually write masked outputs."
+    )
+    p.add_argument(
+        "--on-exists",
+        choices=["skip", "overwrite", "suffix"],
+        default="skip",
+        help="If output exists: skip (default), overwrite, or add '__new' suffix.",
+    )
     p.add_argument("--debug", action="store_true", help="Verbose scan/match logging.")
 
     return p.parse_args()
+
 
 def rio_controls():
     """Standard RIOS writer options: tiled + LZW."""
@@ -118,23 +145,30 @@ def rio_controls():
     c.setOutputDriverName("GTiff")
     c.setWindowXsize(256)
     c.setWindowYsize(256)
-    c.setCreationOptions([
-        "COMPRESS=LZW",
-        "TILED=YES",
-        "BLOCKXSIZE=256",
-        "BLOCKYSIZE=256",
-        "BIGTIFF=IF_SAFER",
-    ])
+    c.setCreationOptions(
+        [
+            "COMPRESS=LZW",
+            "TILED=YES",
+            "BLOCKXSIZE=256",
+            "BLOCKYSIZE=256",
+            "BIGTIFF=IF_SAFER",
+        ]
+    )
     return c
+
 
 def key_from_name(name: str):
     m = RE_KEY.search(name)
     if not m:
         return None
     pr = m.group("pathrow")
-    d  = m.group("date").replace("-", "")
+    d = m.group("date").replace("-", "")
     return (pr, d)
-def collect_pairs(root: Path, include_nonleaf: bool, want_fc: bool, want_sr: bool, debug: bool = True):
+
+
+def collect_pairs(
+    root: Path, include_nonleaf: bool, want_fc: bool, want_sr: bool, debug: bool = True
+):
     """
     Return:
       fc_pairs : list[(fc_path, fmask_path, (pr, yyyymmdd))]
@@ -174,21 +208,33 @@ def collect_pairs(root: Path, include_nonleaf: bool, want_fc: bool, want_sr: boo
                 print(f"     key={key} | FC={is_fc} SR={is_sr} FMASK={is_fm}")
 
             if is_fc:
-                if "fc" not in buckets[key] or len(str(p)) > len(str(buckets[key]["fc"])):
+                if "fc" not in buckets[key] or len(str(p)) > len(
+                    str(buckets[key]["fc"])
+                ):
                     if debug and "fc" in buckets[key]:
-                        print(f"     ↳ replace FC: {buckets[key]['fc'].name} → {p.name}")
+                        print(
+                            f"     ↳ replace FC: {buckets[key]['fc'].name} → {p.name}"
+                        )
                     buckets[key]["fc"] = p
 
             if is_sr:
-                if "sr" not in buckets[key] or len(str(p)) > len(str(buckets[key]["sr"])):
+                if "sr" not in buckets[key] or len(str(p)) > len(
+                    str(buckets[key]["sr"])
+                ):
                     if debug and "sr" in buckets[key]:
-                        print(f"     ↳ replace SR: {buckets[key]['sr'].name} → {p.name}")
+                        print(
+                            f"     ↳ replace SR: {buckets[key]['sr'].name} → {p.name}"
+                        )
                     buckets[key]["sr"] = p
 
             if is_fm:
-                if "fm" not in buckets[key] or len(str(p)) > len(str(buckets[key]["fm"])):
+                if "fm" not in buckets[key] or len(str(p)) > len(
+                    str(buckets[key]["fm"])
+                ):
                     if debug and "fm" in buckets[key]:
-                        print(f"     ↳ replace FM: {buckets[key]['fm'].name} → {p.name}")
+                        print(
+                            f"     ↳ replace FM: {buckets[key]['fm'].name} → {p.name}"
+                        )
                     buckets[key]["fm"] = p
 
     fc_pairs, sr_pairs = [], []
@@ -197,7 +243,9 @@ def collect_pairs(root: Path, include_nonleaf: bool, want_fc: bool, want_sr: boo
     if debug:
         print("\n[BUCKET SUMMARY]")
         for k, d in sorted(buckets.items()):
-            print(f"  key={k} → {{ {', '.join(f'{t}: {Path(v).name}' for t, v in d.items())} }}")
+            print(
+                f"  key={k} → {{ {', '.join(f'{t}: {Path(v).name}' for t, v in d.items())} }}"
+            )
 
     for key, d in buckets.items():
         if "fc" in d and "fm" in d:
@@ -214,11 +262,12 @@ def collect_pairs(root: Path, include_nonleaf: bool, want_fc: bool, want_sr: boo
             orphans["fm"][key] = d["fm"]
 
     if debug:
-        print(f"\n[RESULT] fc_pairs={len(fc_pairs)} sr_pairs={len(sr_pairs)} "
-              f"orphans: fc={len(orphans['fc'])} sr={len(orphans['sr'])} fm={len(orphans['fm'])}")
+        print(
+            f"\n[RESULT] fc_pairs={len(fc_pairs)} sr_pairs={len(sr_pairs)} "
+            f"orphans: fc={len(orphans['fc'])} sr={len(orphans['sr'])} fm={len(orphans['fm'])}"
+        )
 
     return fc_pairs, sr_pairs, orphans
-
 
 
 def out_name_with_suffix(in_path: Path, suffix: str) -> Path:
@@ -228,11 +277,12 @@ def out_name_with_suffix(in_path: Path, suffix: str) -> Path:
         return in_path
     return in_path.with_name(f"{in_path.stem}{suffix}{in_path.suffix}")
 
+
 def apply_mask_rios(in_img: Path, in_fm: Path, out_img: Path, keep_vals):
     """
     Use RIOS to apply the mask. Keep dtype & band count, write masked (0 outside keep).
     """
-    infiles  = applier.FilenameAssociations()
+    infiles = applier.FilenameAssociations()
     outfiles = applier.FilenameAssociations()
     controls = rio_controls()
 
@@ -242,7 +292,7 @@ def apply_mask_rios(in_img: Path, in_fm: Path, out_img: Path, keep_vals):
 
     def do_mask(info, inputs, outputs):
         arr = inputs.img  # (bands, rows, cols)
-        fm  = inputs.fmsk[0]
+        fm = inputs.fmsk[0]
         # valid where FMASK in keep set
         keep = np.isin(fm, np.array(keep_vals, dtype=fm.dtype))
         out = arr.copy()
@@ -251,6 +301,7 @@ def apply_mask_rios(in_img: Path, in_fm: Path, out_img: Path, keep_vals):
 
     applier.apply(do_mask, infiles, outfiles, controls=controls)
 
+
 def resolve_preset_and_suffix(preset: str, mask_keep: list | None):
     """
     Return (keep_vals, suffix). For 'custom', suffix becomes _m<codes>.
@@ -258,12 +309,15 @@ def resolve_preset_and_suffix(preset: str, mask_keep: list | None):
     """
     if preset == "custom":
         if not mask_keep:
-            raise SystemExit("[ERR] --preset custom requires --mask-keep codes (e.g. 1 3 5).")
+            raise SystemExit(
+                "[ERR] --preset custom requires --mask-keep codes (e.g. 1 3 5)."
+            )
         keep_vals = sorted(set(int(x) for x in mask_keep))
         suffix = f"_m{''.join(str(x) for x in keep_vals)}"
         return keep_vals, suffix
     info = PRESETS[preset]
     return info["keep"], info["suffix"]
+
 
 def main():
     args = parse_args()
@@ -279,13 +333,17 @@ def main():
 
     print(f"[INFO] root={root}")
     print(f"[INFO] mode={args.mode} | leaf_only={not args.include_nonleaf}")
-    print(f"[INFO] preset={args.preset} keep={keep_vals} suffix='{suffix or '(no suffix)'}'")
+    print(
+        f"[INFO] preset={args.preset} keep={keep_vals} suffix='{suffix or '(no suffix)'}'"
+    )
     print(f"[INFO] dry_run={args.dry_run and not args.do_write} | do_write={writing}")
     print("")
 
-    fc_pairs, sr_pairs, orphans = collect_pairs(root, args.include_nonleaf, want_fc, want_sr, debug=args.debug)
+    fc_pairs, sr_pairs, orphans = collect_pairs(
+        root, args.include_nonleaf, want_fc, want_sr, debug=args.debug
+    )
 
-    #fc_pairs, sr_pairs, orphans = collect_pairs(root, args.include_nonleaf, want_fc, want_sr)
+    # fc_pairs, sr_pairs, orphans = collect_pairs(root, args.include_nonleaf, want_fc, want_sr)
 
     if want_fc:
         print(f"[FC] pairs: {len(fc_pairs)}")
@@ -362,6 +420,7 @@ def main():
         print(f"\n[WARN] FMASK with NO SR/FC: {len(orphans['fm'])}")
         for (pr, ymd), p in sorted(orphans["fm"].items()):
             print(f"  {pr} {ymd}: {p}")
+
 
 if __name__ == "__main__":
     main()

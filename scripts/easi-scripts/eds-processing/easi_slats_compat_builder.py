@@ -201,6 +201,7 @@ def _stack_sr(
 #     if nodata is not None:
 #         fpc = np.where(mask, 0.0, fpc)
 
+
 #     return np.round(fpc).astype(np.uint8)
 def _convert_fc_to_fpc(
     arr: np.ndarray,
@@ -297,6 +298,7 @@ def _convert_fc_to_fpc(
 #     del out
 #     del ds
 #     return str(out_path)
+
 
 def _write_fc(
     date_tag: str,
@@ -660,7 +662,6 @@ def main(argv=None) -> int:
     #         except Exception as e:
     #             print(f"[ERR] dc4 build failed for {fc_file}: {e}")
 
-
     # ------------------------------------------------------------------
     # 2. Build dc4 from FC inputs
     # ------------------------------------------------------------------
@@ -698,9 +699,11 @@ def main(argv=None) -> int:
         # versions of FC (those ending in "_clr.tif"). This enforces
         # cloud/mask usage.
         if args.fc_only_clr:
+
             def is_clr(path: str) -> bool:
                 name = os.path.basename(path).lower()
                 return "_clr.tif" in name
+
             fc_files = [f for f in fc_files if is_clr(f)]
             print(f"[INFO] --fc-only-clr active; using {len(fc_files)} masked FC files")
 
