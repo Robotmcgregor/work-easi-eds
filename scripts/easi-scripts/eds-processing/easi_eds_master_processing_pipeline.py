@@ -794,7 +794,7 @@ def _resolve_sr_input(
 #         #               '--sr-date', eff_start, '--sr-date', eff_end]
 
 #         # Path to new EASI compat builder in the same folder as this script
-#         compat_script = Path(__file__).resolve().parent / "easi_slats_compat_builder.py"
+#         compat_script = Path(__file__).resolve().parent / "easi_slats_compat_builder_fc.py"
 
 #         cmd_compat = [
 #             pyexe,
@@ -1166,6 +1166,18 @@ def main():
         "--package-dest", help="If set, zip scene outputs to this directory at the end"
     )
 
+    ap.add_argument(
+        "--timeseries-source",
+        choices=["fc", "sr"],
+        default="fc",
+        help=(
+            "Source for time-series stack: "
+            "'fc' (FPC-based dc4 from FC inputs, legacy SLATS style, default) "
+            "or 'sr' (SR-only time-series – uses SR-based compat + legacy scripts)."
+        ),
+    )
+
+
     args = ap.parse_args()
 
     # ----------------------------------------------------------------------
@@ -1180,40 +1192,79 @@ def main():
     compat_dir = Path(args.out_root) / scene
     compat_dir.mkdir(parents=True, exist_ok=True)
 
+    # # ----------------------------------------------------------------------
+    # # 3. Build FC input patterns (for compat builder)
+    # # ----------------------------------------------------------------------
+    # # We want to support different directory layouts and both legacy and
+    # # newer FC naming schemes in one go. This block builds a list of glob
+    # # patterns that the compat builder script will use to find FC inputs.
+    # fc_patterns: List[str] = []
+    # if args.fc_glob:
+    #     # If the user gave an explicit glob, just use that as-is.
+    #     fc_patterns.append(args.fc_glob)
+    # else:
+    #     base_root = args.fc_root or ""
+
+    #     # EASI layout:   <fc_root>/p104r072/fc/...
+    #     scene_dir = os.path.join(base_root, scene, "fc")
+
+    #     # Legacy-ish layouts (if present in some environments):
+    #     #   <fc_root>/104_072/fc
+    #     underscore_dir = os.path.join(base_root, args.tile, "fc")
+    #     #   <fc_root>/104/072/fc
+    #     split_dir = os.path.join(base_root, args.tile.replace("_", "/"), "fc")
+
+    #     # Legacy “fc3ms” format vs newer “fcm” format
+    #     legacy_pattern = "*fc3ms_clr.tif" if args.fc_only_clr else "*fc3ms*.tif"
+    #     easi_pattern = "*fcm*_clr.tif" if args.fc_only_clr else "*fcm*.tif"
+
+    #     for base in (scene_dir, underscore_dir, split_dir):
+    #         for pat in (legacy_pattern, easi_pattern):
+    #             fc_patterns.append(os.path.join(base, "**", pat))
+
+    # # De-duplicate patterns while preserving order so logs stay readable.
+    # seen_fc = set()
+    # fc_patterns = [p for p in fc_patterns if not (p in seen_fc or seen_fc.add(p))]
+    # print(f"[DEBUG] fc_patterns: {fc_patterns}")
+
+        # ----------------------------------------------------------------------
+    # 3. Build FC input patterns (for compat builder, only if using FC mode)
     # ----------------------------------------------------------------------
-    # 3. Build FC input patterns (for compat builder)
-    # ----------------------------------------------------------------------
-    # We want to support different directory layouts and both legacy and
-    # newer FC naming schemes in one go. This block builds a list of glob
-    # patterns that the compat builder script will use to find FC inputs.
     fc_patterns: List[str] = []
-    if args.fc_glob:
-        # If the user gave an explicit glob, just use that as-is.
-        fc_patterns.append(args.fc_glob)
+
+    if args.timeseries_source == "fc":
+        if args.fc_glob:
+            # If the user gave an explicit glob, just use that as-is.
+            fc_patterns.append(args.fc_glob)
+        else:
+            base_root = args.fc_root or ""
+
+            # EASI layout:   <fc_root>/p104r072/fc/...
+            scene_dir = os.path.join(base_root, scene, "fc")
+
+            # Legacy-ish layouts (if present in some environments):
+            #   <fc_root>/104_072/fc
+            underscore_dir = os.path.join(base_root, args.tile, "fc")
+            #   <fc_root>/104/072/fc
+            split_dir = os.path.join(base_root, args.tile.replace("_", "/"), "fc")
+
+            # Legacy “fc3ms” format vs newer “fcm” format
+            legacy_pattern = "*fc3ms_clr.tif" if args.fc_only_clr else "*fc3ms*.tif"
+            easi_pattern = "*fcm*_clr.tif" if args.fc_only_clr else "*fcm*.tif"
+
+            for base in (scene_dir, underscore_dir, split_dir):
+                for pat in (legacy_pattern, easi_pattern):
+                    fc_patterns.append(os.path.join(base, "**", pat))
+
+        # De-duplicate patterns while preserving order so logs stay readable.
+        seen_fc = set()
+        fc_patterns = [p for p in fc_patterns if not (p in seen_fc or seen_fc.add(p))]
     else:
-        base_root = args.fc_root or ""
+        # SR-only mode: compat builder will not need FC inputs.
+        fc_patterns = []
 
-        # EASI layout:   <fc_root>/p104r072/fc/...
-        scene_dir = os.path.join(base_root, scene, "fc")
+    print(f"[DEBUG] timeseries_source={args.timeseries_source}, fc_patterns: {fc_patterns}")
 
-        # Legacy-ish layouts (if present in some environments):
-        #   <fc_root>/104_072/fc
-        underscore_dir = os.path.join(base_root, args.tile, "fc")
-        #   <fc_root>/104/072/fc
-        split_dir = os.path.join(base_root, args.tile.replace("_", "/"), "fc")
-
-        # Legacy “fc3ms” format vs newer “fcm” format
-        legacy_pattern = "*fc3ms_clr.tif" if args.fc_only_clr else "*fc3ms*.tif"
-        easi_pattern = "*fcm*_clr.tif" if args.fc_only_clr else "*fcm*.tif"
-
-        for base in (scene_dir, underscore_dir, split_dir):
-            for pat in (legacy_pattern, easi_pattern):
-                fc_patterns.append(os.path.join(base, "**", pat))
-
-    # De-duplicate patterns while preserving order so logs stay readable.
-    seen_fc = set()
-    fc_patterns = [p for p in fc_patterns if not (p in seen_fc or seen_fc.add(p))]
-    print(f"[DEBUG] fc_patterns: {fc_patterns}")
 
     # ----------------------------------------------------------------------
     # 4. Resolve SR inputs (start and end composites)
@@ -1309,7 +1360,84 @@ def main():
         "outputs": {},
     }
 
-    # ----------------------------------------------------------------------
+    # # ----------------------------------------------------------------------
+    # # 7. Step 1: Build compat products (db8 & dc4) if needed
+    # # ----------------------------------------------------------------------
+    # pyexe = args.python_exe or sys.executable
+
+    # # Expected db8 locations under compat directory
+    # db8_start_expected = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
+    # db8_end_expected = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
+
+    # import glob as _glob
+
+    # dc4_existing = _glob.glob(str(compat_dir / f"lztmre_{scene}_*_dc4mz.img"))
+
+    # # Decide whether we need to (re)build compat products
+    # need_compat = args.force_compat or (
+    #     not db8_start_expected.exists()
+    #     or not db8_end_expected.exists()
+    #     or len(dc4_existing) < 2
+    # )
+
+    # if need_compat:
+    #     # Build db8 (start & end SR stacks) and dc4 (FPC time-series) from FC inputs.
+
+    #     # Path to the new EASI compat builder (sits alongside this script).
+    #     compat_script = Path(__file__).resolve().parent / "easi_slats_compat_builder_fc.py"
+
+    #     cmd_compat = [
+    #         pyexe,
+    #         str(compat_script),
+    #         "--tile",
+    #         scene,
+    #         "--out-root",
+    #         str(compat_dir.parent),  # e.g. /home/jovyan/scratch/eds/compat
+    #         "--sr-dir",
+    #         sr_start_path,
+    #         "--sr-dir",
+    #         sr_end_path,
+    #         "--sr-date",
+    #         eff_start,
+    #         "--sr-date",
+    #         eff_end,
+    #     ]
+
+    #     # Add FC patterns as multiple --fc arguments
+    #     for pat in fc_patterns:
+    #         cmd_compat.extend(["--fc", pat])
+
+    #     # Optional flags to control FC input selection
+    #     if args.fc_only_clr:
+    #         cmd_compat.append("--fc-only-clr")
+    #     if args.fc_prefer_clr:
+    #         cmd_compat.append("--fc-prefer-clr")
+
+    #     # Optional FC→FPC conversion flags (used when dc4 needs to be derived)
+    #     if args.fc_convert_to_fpc:
+    #         cmd_compat.append("--fc-convert-to-fpc")
+    #         cmd_compat.extend(["--fc-k", str(args.fc_k), "--fc-n", str(args.fc_n)])
+    #         if args.fc_nodata is not None:
+    #             cmd_compat.extend(["--fc-nodata", str(args.fc_nodata)])
+
+    #     run_cmd(cmd_compat, args.dry_run, "build_compat", results)
+
+    # else:
+    #     # If compat products are already in place and not forcibly rebuilt.
+    #     print("\n[STEP] build_compat")
+    #     print(
+    #         "Existing compat products detected; skipping build (use --force-compat to rebuild)"
+    #     )
+
+    # # Confirm final db8 locations (fall back to current directory if needed)
+    # db8_start = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
+    # db8_end = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
+    # if not db8_start.exists():
+    #     db8_start = Path(f"lztmre_{scene}_{eff_start}_db8mz.img")
+    # if not db8_end.exists():
+    #     db8_end = Path(f"lztmre_{scene}_{eff_end}_db8mz.img")
+
+        # ----------------------------------------------------------------------
     # 7. Step 1: Build compat products (db8 & dc4) if needed
     # ----------------------------------------------------------------------
     pyexe = args.python_exe or sys.executable
@@ -1330,10 +1458,13 @@ def main():
     )
 
     if need_compat:
-        # Build db8 (start & end SR stacks) and dc4 (FPC time-series) from FC inputs.
-
-        # Path to the new EASI compat builder (sits alongside this script).
-        compat_script = Path(__file__).resolve().parent / "easi_slats_compat_builder.py"
+        # Build db8 (start & end SR stacks) and dc4 (time-series stack).
+        # Choose compat builder based on timeseries source.
+        if args.timeseries_source == "fc":
+            compat_script = Path(__file__).resolve().parent / "easi_slats_compat_builder_fc.py"
+        else:
+            # SR-only timeseries variant – you will implement this script.
+            compat_script = Path(__file__).resolve().parent / "easi_slats_compat_builder_sr.py"
 
         cmd_compat = [
             pyexe,
@@ -1352,22 +1483,27 @@ def main():
             eff_end,
         ]
 
-        # Add FC patterns as multiple --fc arguments
-        for pat in fc_patterns:
-            cmd_compat.extend(["--fc", pat])
+        if args.timeseries_source == "fc":
+            # Add FC patterns as multiple --fc arguments
+            for pat in fc_patterns:
+                cmd_compat.extend(["--fc", pat])
 
-        # Optional flags to control FC input selection
-        if args.fc_only_clr:
-            cmd_compat.append("--fc-only-clr")
-        if args.fc_prefer_clr:
-            cmd_compat.append("--fc-prefer-clr")
+            # Optional flags to control FC input selection
+            if args.fc_only_clr:
+                cmd_compat.append("--fc-only-clr")
+            if args.fc_prefer_clr:
+                cmd_compat.append("--fc-prefer-clr")
 
-        # Optional FC→FPC conversion flags (used when dc4 needs to be derived)
-        if args.fc_convert_to_fpc:
-            cmd_compat.append("--fc-convert-to-fpc")
-            cmd_compat.extend(["--fc-k", str(args.fc_k), "--fc-n", str(args.fc_n)])
-            if args.fc_nodata is not None:
-                cmd_compat.extend(["--fc-nodata", str(args.fc_nodata)])
+            # Optional FC→FPC conversion flags (used when dc4 needs to be derived)
+            if args.fc_convert_to_fpc:
+                cmd_compat.append("--fc-convert-to-fpc")
+                cmd_compat.extend(["--fc-k", str(args.fc_k), "--fc-n", str(args.fc_n)])
+                if args.fc_nodata is not None:
+                    cmd_compat.extend(["--fc-nodata", str(args.fc_nodata)])
+        else:
+            # SR-only mode: SR compat builder should not require FC inputs.
+            # You can add SR-specific flags here if needed later.
+            cmd_compat.append("--sr-timeseries")  # example hook; safe to remove/change
 
         run_cmd(cmd_compat, args.dry_run, "build_compat", results)
 
@@ -1378,23 +1514,66 @@ def main():
             "Existing compat products detected; skipping build (use --force-compat to rebuild)"
         )
 
-    # Confirm final db8 locations (fall back to current directory if needed)
-    db8_start = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
-    db8_end = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
-    if not db8_start.exists():
-        db8_start = Path(f"lztmre_{scene}_{eff_start}_db8mz.img")
-    if not db8_end.exists():
-        db8_end = Path(f"lztmre_{scene}_{eff_end}_db8mz.img")
 
-    # ----------------------------------------------------------------------
+    # # ----------------------------------------------------------------------
+    # # 8. Step 2: Legacy change detection (DLL/DLJ)
+    # # ----------------------------------------------------------------------
+    # # Combine db8 (start/end) and dc4 (FPC stack) into clearing
+    # # classification (DLL) and interpretation (DLJ) rasters.
+    # dc4_glob = str(compat_dir / f"lztmre_{scene}_*_dc4mz.img")
+
+    # # Path to legacy method script (lives next to this pipeline).
+    # legacy_script = Path(__file__).resolve().parent / "easi_eds_legacy_method_window.py"
+
+    # cmd_legacy = [
+    #     pyexe,
+    #     str(legacy_script),
+    #     "--scene",
+    #     scene,
+    #     "--start-date",
+    #     eff_start,
+    #     "--end-date",
+    #     eff_end,
+    #     "--window-start",
+    #     win_start,
+    #     "--window-end",
+    #     win_end,
+    #     "--lookback",
+    #     str(lookback),
+    #     "--start-db8",
+    #     str(db8_start),
+    #     "--end-db8",
+    #     str(db8_end),
+    #     "--dc4-glob",
+    #     dc4_glob,
+    #     "--verbose",
+    # ]
+    # if args.omit_fpc_start_threshold:
+    #     cmd_legacy.append("--omit-fpc-start-threshold")
+
+    # run_cmd(cmd_legacy, args.dry_run, "legacy_method", results)
+
+    # # Expected DLL/DLJ outputs
+    # dll = compat_dir / f"lztmre_{scene}_d{eff_start}{eff_end}_dllmz.img"
+    # dlj = compat_dir / f"lztmre_{scene}_d{eff_start}{eff_end}_dljmz.img"
+    # if not dll.exists():
+    #     dll = Path(f"lztmre_{scene}_d{eff_start}{eff_end}_dllmz.img")
+    # if not dlj.exists():
+    #     dlj = Path(f"lztmre_{scene}_d{eff_start}{eff_end}_dljmz.img")
+
+        # ----------------------------------------------------------------------
     # 8. Step 2: Legacy change detection (DLL/DLJ)
     # ----------------------------------------------------------------------
-    # Combine db8 (start/end) and dc4 (FPC stack) into clearing
+    # Combine db8 (start/end) and dc4 (time-series stack) into clearing
     # classification (DLL) and interpretation (DLJ) rasters.
     dc4_glob = str(compat_dir / f"lztmre_{scene}_*_dc4mz.img")
 
     # Path to legacy method script (lives next to this pipeline).
-    legacy_script = Path(__file__).resolve().parent / "easi_eds_legacy_method_window.py"
+    if args.timeseries_source == "fc":
+        legacy_script = Path(__file__).resolve().parent / "easi_eds_legacy_method_window_fc.py"
+    else:
+        # SR-only timeseries variant – you will implement this script.
+        legacy_script = Path(__file__).resolve().parent / "easi_eds_legacy_method_window_sr.py"
 
     cmd_legacy = [
         pyexe,
@@ -1419,18 +1598,13 @@ def main():
         dc4_glob,
         "--verbose",
     ]
-    if args.omit_fpc_start_threshold:
+
+    # The fpc-start threshold flag only makes sense for FPC-based (FC) mode.
+    if args.timeseries_source == "fc" and args.omit_fpc_start_threshold:
         cmd_legacy.append("--omit-fpc-start-threshold")
 
     run_cmd(cmd_legacy, args.dry_run, "legacy_method", results)
 
-    # Expected DLL/DLJ outputs
-    dll = compat_dir / f"lztmre_{scene}_d{eff_start}{eff_end}_dllmz.img"
-    dlj = compat_dir / f"lztmre_{scene}_d{eff_start}{eff_end}_dljmz.img"
-    if not dll.exists():
-        dll = Path(f"lztmre_{scene}_d{eff_start}{eff_end}_dllmz.img")
-    if not dlj.exists():
-        dlj = Path(f"lztmre_{scene}_d{eff_start}{eff_end}_dljmz.img")
 
     # ----------------------------------------------------------------------
     # 9. Step 3: Style outputs (apply palette & band names)
@@ -1498,78 +1672,163 @@ def main():
     ]
     run_cmd(cmd_post, args.dry_run, "vector_postprocess", results)
 
-    # ----------------------------------------------------------------------
+    # # ----------------------------------------------------------------------
+    # # 12. Step 6: FC coverage masks (extent / ratio presence)
+    # # ----------------------------------------------------------------------
+    # fc_cov_dir = compat_dir / "fc_coverage"
+    # fc_cov_dir.mkdir(parents=True, exist_ok=True)
+
+    # cov_script = Path(__file__).resolve().parent / "easi_fc_coverage_extent.py"
+
+    # cmd_cov = [
+    #     pyexe,
+    #     str(cov_script),
+    #     "--fc-dir",
+    #     str(compat_dir),
+    #     "--scene",
+    #     scene,
+    #     "--pattern",
+    #     "*_dc4mz.img",
+    #     "--out-dir",
+    #     str(fc_cov_dir),
+    # ]
+    # if args.ratio_presence:
+    #     cmd_cov.append("--ratios")
+    #     cmd_cov.extend(str(r) for r in args.ratio_presence)
+    # if args.save_per_input_masks:
+    #     cmd_cov.append("--save-per-input-masks")
+
+    # run_cmd(cmd_cov, args.dry_run, "fc_coverage", results)
+
+        # ----------------------------------------------------------------------
     # 12. Step 6: FC coverage masks (extent / ratio presence)
     # ----------------------------------------------------------------------
-    fc_cov_dir = compat_dir / "fc_coverage"
-    fc_cov_dir.mkdir(parents=True, exist_ok=True)
+    if args.timeseries_source == "fc":
+        fc_cov_dir = compat_dir / "fc_coverage"
+        fc_cov_dir.mkdir(parents=True, exist_ok=True)
 
-    cov_script = Path(__file__).resolve().parent / "easi_fc_coverage_extent.py"
+        cov_script = Path(__file__).resolve().parent / "easi_fc_coverage_extent.py"
 
-    cmd_cov = [
-        pyexe,
-        str(cov_script),
-        "--fc-dir",
-        str(compat_dir),
-        "--scene",
-        scene,
-        "--pattern",
-        "*_dc4mz.img",
-        "--out-dir",
-        str(fc_cov_dir),
-    ]
-    if args.ratio_presence:
-        cmd_cov.append("--ratios")
-        cmd_cov.extend(str(r) for r in args.ratio_presence)
-    if args.save_per_input_masks:
-        cmd_cov.append("--save-per-input-masks")
+        cmd_cov = [
+            pyexe,
+            str(cov_script),
+            "--fc-dir",
+            str(compat_dir),
+            "--scene",
+            scene,
+            "--pattern",
+            "*_dc4mz.img",
+            "--out-dir",
+            str(fc_cov_dir),
+        ]
+        if args.ratio_presence:
+            cmd_cov.append("--ratios")
+            cmd_cov.extend(str(r) for r in args.ratio_presence)
+        if args.save_per_input_masks:
+            cmd_cov.append("--save-per-input-masks")
 
-    run_cmd(cmd_cov, args.dry_run, "fc_coverage", results)
+        run_cmd(cmd_cov, args.dry_run, "fc_coverage", results)
+    else:
+        # SR-only mode: FC coverage step is not applicable.
+        fc_cov_dir = compat_dir / "fc_coverage"
+        print("\n[STEP] fc_coverage")
+        print("Skipping FC coverage – timeseries_source='sr'.")
 
-    # ----------------------------------------------------------------------
+
+    # # ----------------------------------------------------------------------
+    # # 13. Step 7: Clip polygons to strict / ratio coverage (if available)
+    # # ----------------------------------------------------------------------
+    # clip_script = Path(__file__).resolve().parent / "easi_clip_vectors.py"
+
+    # # Strict coverage polygon
+    # strict_shp = fc_cov_dir / f"{scene}_fc_consistent.shp"
+    # if strict_shp.exists():
+    #     clipped_strict = (
+    #         compat_dir
+    #         / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_strict"
+    #     )
+    #     clipped_strict.mkdir(parents=True, exist_ok=True)
+    #     cmd_clip_strict = [
+    #         pyexe,
+    #         str(clip_script),
+    #         "--input-dir",
+    #         str(shp_clean),
+    #         "--clip",
+    #         str(strict_shp),
+    #         "--out-dir",
+    #         str(clipped_strict),
+    #     ]
+    #     run_cmd(cmd_clip_strict, args.dry_run, "clip_strict", results)
+
+    # # Ratio coverage polygon/mask
+    # ratio_mask = fc_cov_dir / f"{scene}_fc_consistent_mask.shp"
+    # if ratio_mask.exists():
+    #     clipped_ratio = (
+    #         compat_dir
+    #         / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_ratio"
+    #     )
+    #     clipped_ratio.mkdir(parents=True, exist_ok=True)
+    #     cmd_clip_ratio = [
+    #         pyexe,
+    #         str(clip_script),
+    #         "--input-dir",
+    #         str(shp_clean),
+    #         "--clip",
+    #         str(ratio_mask),
+    #         "--out-dir",
+    #         str(clipped_ratio),
+    #     ]
+    #     run_cmd(cmd_clip_ratio, args.dry_run, "clip_ratio", results)
+
+        # ----------------------------------------------------------------------
     # 13. Step 7: Clip polygons to strict / ratio coverage (if available)
     # ----------------------------------------------------------------------
     clip_script = Path(__file__).resolve().parent / "easi_clip_vectors.py"
 
-    # Strict coverage polygon
-    strict_shp = fc_cov_dir / f"{scene}_fc_consistent.shp"
-    if strict_shp.exists():
-        clipped_strict = (
-            compat_dir
-            / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_strict"
-        )
-        clipped_strict.mkdir(parents=True, exist_ok=True)
-        cmd_clip_strict = [
-            pyexe,
-            str(clip_script),
-            "--input-dir",
-            str(shp_clean),
-            "--clip",
-            str(strict_shp),
-            "--out-dir",
-            str(clipped_strict),
-        ]
-        run_cmd(cmd_clip_strict, args.dry_run, "clip_strict", results)
+    if args.timeseries_source == "fc":
+        # Strict coverage polygon
+        strict_shp = fc_cov_dir / f"{scene}_fc_consistent.shp"
+        if strict_shp.exists():
+            clipped_strict = (
+                compat_dir
+                / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_strict"
+            )
+            clipped_strict.mkdir(parents=True, exist_ok=True)
+            cmd_clip_strict = [
+                pyexe,
+                str(clip_script),
+                "--input-dir",
+                str(shp_clean),
+                "--clip",
+                str(strict_shp),
+                "--out-dir",
+                str(clipped_strict),
+            ]
+            run_cmd(cmd_clip_strict, args.dry_run, "clip_strict", results)
 
-    # Ratio coverage polygon/mask
-    ratio_mask = fc_cov_dir / f"{scene}_fc_consistent_mask.shp"
-    if ratio_mask.exists():
-        clipped_ratio = (
-            compat_dir
-            / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_ratio"
-        )
-        clipped_ratio.mkdir(parents=True, exist_ok=True)
-        cmd_clip_ratio = [
-            pyexe,
-            str(clip_script),
-            "--input-dir",
-            str(shp_clean),
-            "--clip",
-            str(ratio_mask),
-            "--out-dir",
-            str(clipped_ratio),
-        ]
-        run_cmd(cmd_clip_ratio, args.dry_run, "clip_ratio", results)
+        # Ratio coverage polygon/mask
+        ratio_mask = fc_cov_dir / f"{scene}_fc_consistent_mask.shp"
+        if ratio_mask.exists():
+            clipped_ratio = (
+                compat_dir
+                / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha_clean_clip_ratio"
+            )
+            clipped_ratio.mkdir(parents=True, exist_ok=True)
+            cmd_clip_ratio = [
+                pyexe,
+                str(clip_script),
+                "--input-dir",
+                str(shp_clean),
+                "--clip",
+                str(ratio_mask),
+                "--out-dir",
+                str(clipped_ratio),
+            ]
+            run_cmd(cmd_clip_ratio, args.dry_run, "clip_ratio", results)
+    else:
+        print("\n[STEP] clip_vectors")
+        print("Skipping FC-based clipping – timeseries_source='sr'.")
+
 
     # ----------------------------------------------------------------------
     # 14. Step 8: Optional packaging to ZIP
@@ -1604,6 +1863,7 @@ def main():
         "clean_polygons_dir": str(shp_clean),
         "fc_coverage_dir": str(fc_cov_dir),
     }
+
 
     print("\n=== EDS MASTER PIPELINE COMPLETE ===")
     print(json.dumps(results, indent=2))
