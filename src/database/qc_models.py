@@ -30,9 +30,9 @@ class QCValidation(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
-    # Link to original detection
+    # Link to original detection (keeping nvms_detection_id for backwards compatibility)
     nvms_detection_id = Column(
-        Integer, ForeignKey("nvms_detections.id"), nullable=False, index=True
+        Integer, ForeignKey("eds_detections.id"), nullable=False, index=True
     )
     tile_id = Column(String(20), nullable=False, index=True)
 
