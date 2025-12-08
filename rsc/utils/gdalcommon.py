@@ -2,6 +2,7 @@
 Shim for rsc.utils.gdalcommon used by the QLD script.
 Implements colour table helpers as no-ops.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional

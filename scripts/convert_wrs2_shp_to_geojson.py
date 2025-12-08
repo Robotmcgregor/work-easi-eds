@@ -24,7 +24,10 @@ import sys
 try:
     import shapefile  # pyshp
 except ImportError:
-    print("Missing dependency: pyshp. Install with: py -m pip install pyshp", file=sys.stderr)
+    print(
+        "Missing dependency: pyshp. Install with: py -m pip install pyshp",
+        file=sys.stderr,
+    )
     raise
 
 
@@ -43,7 +46,11 @@ def shp_to_geojson(shp_path: Path, out_path: Path) -> None:
     features = []
     for sr in r.shapeRecords():
         geom = sr.shape.__geo_interface__
-        rec = sr.record.as_dict() if hasattr(sr.record, 'as_dict') else {k: sr.record[i] for i, k in enumerate(fields)}
+        rec = (
+            sr.record.as_dict()
+            if hasattr(sr.record, "as_dict")
+            else {k: sr.record[i] for i, k in enumerate(fields)}
+        )
         features.append({"type": "Feature", "geometry": geom, "properties": rec})
 
     fc = {"type": "FeatureCollection", "features": features}
@@ -52,7 +59,9 @@ def shp_to_geojson(shp_path: Path, out_path: Path) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Convert WRS-2 Shapefile to GeoJSON (no GDAL)")
+    p = argparse.ArgumentParser(
+        description="Convert WRS-2 Shapefile to GeoJSON (no GDAL)"
+    )
     p.add_argument("shapefile", help="Path to WRS-2 .shp file")
     p.add_argument("--out", default="data/WRS2.geojson", help="Output GeoJSON path")
     return p
@@ -65,11 +74,13 @@ def main(argv=None) -> int:
     if not shp_path.exists():
         print(f"Shapefile not found: {shp_path}", file=sys.stderr)
         return 2
-    prj = read_prj(shp_path.with_suffix('.prj'))
+    prj = read_prj(shp_path.with_suffix(".prj"))
     if prj and ("WGS_1984" in prj or "WGS 84" in prj or "4326" in prj):
         pass
     else:
-        print("Warning: .prj not found or not WGS84 (EPSG:4326). Consider reprojecting via QGIS if needed.")
+        print(
+            "Warning: .prj not found or not WGS84 (EPSG:4326). Consider reprojecting via QGIS if needed."
+        )
     out_path = Path(args.out)
     shp_to_geojson(shp_path, out_path)
     print(f"Wrote GeoJSON: {out_path}")

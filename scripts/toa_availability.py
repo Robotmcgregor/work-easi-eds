@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 """
 Summarize TOA (Landsat Collection 2 Level-1) availability per Australian tile for a given date range.
@@ -53,7 +52,13 @@ def _parse_dates(args: argparse.Namespace) -> Tuple[str, str]:
     return start_iso, end_iso
 
 
-def _filter_for_tile(path: int, row: int, start_iso: str, end_iso: str, collections: Optional[List[str]] = None):
+def _filter_for_tile(
+    path: int,
+    row: int,
+    start_iso: str,
+    end_iso: str,
+    collections: Optional[List[str]] = None,
+):
     clauses: List[dict] = [
         {"op": "between", "args": [{"property": "datetime"}, start_iso, end_iso]},
         {"op": "=", "args": [{"property": "landsat:wrs_path"}, int(path)]},
@@ -61,7 +66,9 @@ def _filter_for_tile(path: int, row: int, start_iso: str, end_iso: str, collecti
         {"op": "<", "args": [{"property": "eo:cloud_cover"}, 100]},
     ]
     if collections:
-        clauses.append({"op": "in", "args": [{"property": "collection"}, list(collections)]})
+        clauses.append(
+            {"op": "in", "args": [{"property": "collection"}, list(collections)]}
+        )
     return {"op": "and", "args": clauses}
 
 
@@ -78,24 +85,42 @@ class TileSummary:
 def iter_au_tiles() -> Iterable[LandsatTile]:
     with get_db() as session:
         # Assume landsat_tiles table contains AU tiles only in this deployment; keep simple ordering
-        for t in session.query(LandsatTile).order_by(LandsatTile.path, LandsatTile.row).all():
+        for t in (
+            session.query(LandsatTile).order_by(LandsatTile.path, LandsatTile.row).all()
+        ):
             yield t
 
 
-def summarize_tile(client: STACClient, tile: LandsatTile, start_iso: str, end_iso: str, collections: List[str], limit: int) -> TileSummary:
+def summarize_tile(
+    client: STACClient,
+    tile: LandsatTile,
+    start_iso: str,
+    end_iso: str,
+    collections: List[str],
+    limit: int,
+) -> TileSummary:
     filt = _filter_for_tile(tile.path, tile.row, start_iso, end_iso, collections)
     res = client.search_cql2(collections=collections, filter_obj=filt, limit=limit)
     feats = res.get("features", []) or []
+
     # Sort by datetime
     def _dt(it):
         try:
             return it.get("properties", {}).get("datetime") or ""
         except Exception:
             return ""
+
     feats_sorted = sorted(feats, key=_dt)
     first_dt = feats_sorted[0]["properties"].get("datetime") if feats_sorted else None
     last_dt = feats_sorted[-1]["properties"].get("datetime") if feats_sorted else None
-    return TileSummary(tile_id=tile.tile_id, path=tile.path, row=tile.row, count=len(feats), first_date=first_dt, last_date=last_dt)
+    return TileSummary(
+        tile_id=tile.tile_id,
+        path=tile.path,
+        row=tile.row,
+        count=len(feats),
+        first_date=first_dt,
+        last_date=last_dt,
+    )
 
 
 def write_csv(summaries: List[TileSummary], csv_path: str) -> None:
@@ -105,7 +130,16 @@ def write_csv(summaries: List[TileSummary], csv_path: str) -> None:
         w = csv.writer(f)
         w.writerow(["tile_id", "path", "row", "count", "first_date", "last_date"])
         for s in summaries:
-            w.writerow([s.tile_id, s.path, s.row, s.count, s.first_date or "", s.last_date or ""])
+            w.writerow(
+                [
+                    s.tile_id,
+                    s.path,
+                    s.row,
+                    s.count,
+                    s.first_date or "",
+                    s.last_date or "",
+                ]
+            )
 
 
 def _parse_tile_id(tile: str) -> Tuple[int, int]:
@@ -145,8 +179,14 @@ def _infer_sensor(item: dict) -> str:
 def _acq_date_from_item(item: dict) -> str:
     """Extract acquisition date as YYYY-MM-DD, preferring product/scene id pattern over properties.datetime."""
     props = item.get("properties", {})
-    pid = props.get("landsat:landsat_product_id") or props.get("landsat:scene_id") or item.get("id") or ""
+    pid = (
+        props.get("landsat:landsat_product_id")
+        or props.get("landsat:scene_id")
+        or item.get("id")
+        or ""
+    )
     import re
+
     m = re.search(r"_(\d{8})_", str(pid))
     if m:
         ymd = m.group(1)
@@ -159,77 +199,157 @@ def cmd_list_tile_items(args: argparse.Namespace) -> int:
     start_iso, end_iso = _parse_dates(args)
     path, row = _parse_tile_id(args.tile_id)
     client = STACClient(base_url=args.stac_base)
-    collections = _collections_for_server(args.stac_base, args.sensors, args.collections)
+    collections = _collections_for_server(
+        args.stac_base, args.sensors, args.collections
+    )
 
     # Build base filter (time + path/row + cloud); we'll query per collection to avoid cross-collection bleed-through
     base_filt = _filter_for_tile(path, row, start_iso, end_iso, None)
     feats: List[dict] = []
     # Prefer standard search with 'query' on Earth Search to ensure collection/path/row are respected
-    is_earthsearch = ("earth-search" in (args.stac_base or "")) or ("element84" in (args.stac_base or ""))
-    bbox = None if getattr(args, 'no_bbox', False) else get_tile_bbox(args.tile_id)
-    if getattr(args, 'only_bbox', False):
+    is_earthsearch = ("earth-search" in (args.stac_base or "")) or (
+        "element84" in (args.stac_base or "")
+    )
+    bbox = None if getattr(args, "no_bbox", False) else get_tile_bbox(args.tile_id)
+    if getattr(args, "only_bbox", False):
         dt_range = f"{start_iso}/{end_iso}"
         if collections:
             for coll in collections:
-                res = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit, query=None)
+                res = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=args.limit,
+                    query=None,
+                )
                 feats.extend(res.get("features", []) or [])
         else:
-            res = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit, query=None)
+            res = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=args.limit,
+                query=None,
+            )
             feats.extend(res.get("features", []) or [])
     elif collections:
         for coll in collections:
             if is_earthsearch:
                 dt_range = f"{start_iso}/{end_iso}"
                 # Try landsat:* keys
-                res = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                     query={"landsat:wrs_path": {"eq": int(path)}, "landsat:wrs_row": {"eq": int(row)}})
+                res = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=args.limit,
+                    query={
+                        "landsat:wrs_path": {"eq": int(path)},
+                        "landsat:wrs_row": {"eq": int(row)},
+                    },
+                )
                 feats.extend(res.get("features", []) or [])
                 # Also try plain wrs_* keys (used by some catalogs)
-                res2 = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                      query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}})
+                res2 = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=args.limit,
+                    query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}},
+                )
                 feats.extend(res2.get("features", []) or [])
                 # And try namespaced wrs:path/wrs:row
-                res3 = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                      query={"wrs:path": {"eq": int(path)}, "wrs:row": {"eq": int(row)}})
+                res3 = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=args.limit,
+                    query={"wrs:path": {"eq": int(path)}, "wrs:row": {"eq": int(row)}},
+                )
                 feats.extend(res3.get("features", []) or [])
                 # And landsat:path/landsat:row variants
-                res4 = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                      query={"landsat:path": {"eq": int(path)}, "landsat:row": {"eq": int(row)}})
+                res4 = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=args.limit,
+                    query={
+                        "landsat:path": {"eq": int(path)},
+                        "landsat:row": {"eq": int(row)},
+                    },
+                )
                 feats.extend(res4.get("features", []) or [])
                 continue
             else:
-                res = client.search_cql2(collections=[coll], filter_obj=base_filt, limit=args.limit)
+                res = client.search_cql2(
+                    collections=[coll], filter_obj=base_filt, limit=args.limit
+                )
             feats.extend(res.get("features", []) or [])
     else:
         if is_earthsearch:
             dt_range = f"{start_iso}/{end_iso}"
-            res = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                 query={"landsat:wrs_path": {"eq": int(path)}, "landsat:wrs_row": {"eq": int(row)}})
+            res = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=args.limit,
+                query={
+                    "landsat:wrs_path": {"eq": int(path)},
+                    "landsat:wrs_row": {"eq": int(row)},
+                },
+            )
             feats.extend(res.get("features", []) or [])
-            res2 = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                  query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}})
+            res2 = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=args.limit,
+                query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}},
+            )
             feats.extend(res2.get("features", []) or [])
-            res3 = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                  query={"wrs:path": {"eq": int(path)}, "wrs:row": {"eq": int(row)}})
+            res3 = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=args.limit,
+                query={"wrs:path": {"eq": int(path)}, "wrs:row": {"eq": int(row)}},
+            )
             feats.extend(res3.get("features", []) or [])
-            res4 = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                  query={"landsat:path": {"eq": int(path)}, "landsat:row": {"eq": int(row)}})
+            res4 = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=args.limit,
+                query={
+                    "landsat:path": {"eq": int(path)},
+                    "landsat:row": {"eq": int(row)},
+                },
+            )
             feats.extend(res4.get("features", []) or [])
             # already extended; skip cql2
             pass
         else:
-            res = client.search_cql2(collections=None, filter_obj=base_filt, limit=args.limit)
+            res = client.search_cql2(
+                collections=None, filter_obj=base_filt, limit=args.limit
+            )
             feats.extend(res.get("features", []) or [])
     # Filter to Landsat by ID prefix as a final guard (removes Sentinel spillover)
     allowed_prefixes = []
-    for s in (args.sensors or []):
+    for s in args.sensors or []:
         s = s.lower()
-        if s == "l5": allowed_prefixes.append("LT05")
-        elif s == "l7": allowed_prefixes.append("LE07")
-        elif s == "l8": allowed_prefixes.append("LC08")
-        elif s == "l9": allowed_prefixes.append("LC09")
+        if s == "l5":
+            allowed_prefixes.append("LT05")
+        elif s == "l7":
+            allowed_prefixes.append("LE07")
+        elif s == "l8":
+            allowed_prefixes.append("LC08")
+        elif s == "l9":
+            allowed_prefixes.append("LC09")
     if allowed_prefixes:
-        feats = [it for it in feats if any((it.get("id") or "").startswith(p) for p in allowed_prefixes)]
+        feats = [
+            it
+            for it in feats
+            if any((it.get("id") or "").startswith(p) for p in allowed_prefixes)
+        ]
 
     # Normalize rows
     rows: List[Tuple[str, int, int, str, str, str, str, float]] = []
@@ -243,8 +363,20 @@ def cmd_list_tile_items(args: argparse.Namespace) -> int:
             cloud_f = float(cloud) if cloud is not None else float("nan")
         except Exception:
             cloud_f = float("nan")
-        coll = (it.get("collection") or (collections[0] if collections else ""))
-        rows.append((args.tile_id, path, row, year, sensor, acq, coll, it.get("id") or "", cloud_f))
+        coll = it.get("collection") or (collections[0] if collections else "")
+        rows.append(
+            (
+                args.tile_id,
+                path,
+                row,
+                year,
+                sensor,
+                acq,
+                coll,
+                it.get("id") or "",
+                cloud_f,
+            )
+        )
 
     # Sort by datetime
     rows.sort(key=lambda r: r[5])
@@ -254,7 +386,9 @@ def cmd_list_tile_items(args: argparse.Namespace) -> int:
     for r in rows:
         tile_id, p, rw, year, sensor, dt, coll, scene_id, cloud = r
         cloud_txt = "" if cloud != cloud else f" cloud={cloud:.2f}"
-        print(f"{tile_id},{p:03d},{rw:03d},{year},{sensor},{dt},{coll},{scene_id}{cloud_txt}")
+        print(
+            f"{tile_id},{p:03d},{rw:03d},{year},{sensor},{dt},{coll},{scene_id}{cloud_txt}"
+        )
 
     # CSV output
     if args.csv:
@@ -262,14 +396,30 @@ def cmd_list_tile_items(args: argparse.Namespace) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         with open(args.csv, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["tile_id", "path", "row", "year", "sensor", "acq_date", "collection", "scene_id", "cloud_cover"])
+            w.writerow(
+                [
+                    "tile_id",
+                    "path",
+                    "row",
+                    "year",
+                    "sensor",
+                    "acq_date",
+                    "collection",
+                    "scene_id",
+                    "cloud_cover",
+                ]
+            )
             for r in rows:
                 w.writerow(list(r))
         print(f"Wrote CSV: {args.csv}")
     return 0
 
 
-def _collections_for_server(base_url: str, sensors: Optional[List[str]], explicit_collections: Optional[List[str]]) -> List[str]:
+def _collections_for_server(
+    base_url: str,
+    sensors: Optional[List[str]],
+    explicit_collections: Optional[List[str]],
+) -> List[str]:
     # If user provided collections explicitly, honor them
     if explicit_collections:
         return explicit_collections
@@ -303,10 +453,12 @@ def _collections_for_server(base_url: str, sensors: Optional[List[str]], explici
             if "landsat-c2l1" not in cols:
                 cols.append("landsat-c2l1")
     # Deduplicate while preserving order
-    seen = set(); out: List[str] = []
+    seen = set()
+    out: List[str] = []
     for c in cols:
         if c not in seen:
-            out.append(c); seen.add(c)
+            out.append(c)
+            seen.add(c)
     return out
 
 
@@ -319,6 +471,7 @@ def _ensure_item_with_assets(client: STACClient, base_url: str, item: dict) -> d
     if not coll or not item_id:
         return item
     import requests
+
     url = f"{base_url.rstrip('/')}/collections/{coll}/items/{item_id}"
     try:
         r = requests.get(url, timeout=60)
@@ -328,7 +481,9 @@ def _ensure_item_with_assets(client: STACClient, base_url: str, item: dict) -> d
         return item
 
 
-def _select_assets_for_toa(item: dict, also_angles: bool, also_qa: bool) -> List[Tuple[str, str]]:
+def _select_assets_for_toa(
+    item: dict, also_angles: bool, also_qa: bool
+) -> List[Tuple[str, str]]:
     # Returns list of (filename, href)
     assets = item.get("assets", {}) or {}
     selected: List[Tuple[str, str]] = []
@@ -369,11 +524,12 @@ def _select_assets_for_toa(item: dict, also_angles: bool, also_qa: bool) -> List
 
 def _download_file(url: str, dest_path: Path) -> str:
     import requests, os
+
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     with requests.get(url, stream=True, timeout=120) as r:
         r.raise_for_status()
         with open(dest_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024*1024):
+            for chunk in r.iter_content(chunk_size=1024 * 1024):
                 if chunk:
                     f.write(chunk)
     return str(dest_path)
@@ -405,10 +561,12 @@ def _parse_bands_arg(bands_arg: Optional[List[str]]) -> List[str]:
             if b:
                 out.append(b)
     # Dedup preserve order
-    seen=set(); res=[]
+    seen = set()
+    res = []
     for b in out:
         if b not in seen:
-            res.append(b); seen.add(b)
+            res.append(b)
+            seen.add(b)
     return res
 
 
@@ -427,7 +585,7 @@ def _select_band_assets(item: dict, desired_bands: List[str]) -> List[Tuple[str,
         fnameu = fname.upper()
         for b in list(dbset):
             # Match by asset key equal to band id OR filename containing _B{n}.TIF
-            if keyu == b or ("_"+b+".") in fnameu or ("_"+b+"_") in fnameu:
+            if keyu == b or ("_" + b + ".") in fnameu or ("_" + b + "_") in fnameu:
                 selected.append((fname, href))
                 break
     return selected
@@ -438,42 +596,73 @@ def cmd_download_tile_metadata(args: argparse.Namespace) -> int:
     start_iso, end_iso = _parse_dates(args)
     path, row = _parse_tile_id(args.tile_id)
     client = STACClient(base_url=args.stac_base)
-    collections = _collections_for_server(args.stac_base, args.sensors, args.collections)
+    collections = _collections_for_server(
+        args.stac_base, args.sensors, args.collections
+    )
 
     # Gather items using Earth Search or LandsatLook paths like in list-tile
     feats: List[dict] = []
-    is_earthsearch = ("earth-search" in (args.stac_base or "")) or ("element84" in (args.stac_base or ""))
-    bbox = None if getattr(args, 'no_bbox', False) else get_tile_bbox(args.tile_id)
+    is_earthsearch = ("earth-search" in (args.stac_base or "")) or (
+        "element84" in (args.stac_base or "")
+    )
+    bbox = None if getattr(args, "no_bbox", False) else get_tile_bbox(args.tile_id)
     dt_range = f"{start_iso}/{end_iso}"
     if collections:
         for coll in collections:
             if is_earthsearch:
-                res = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                     query={"landsat:wrs_path": {"eq": int(path)}, "landsat:wrs_row": {"eq": int(row)}})
+                res = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=args.limit,
+                    query={
+                        "landsat:wrs_path": {"eq": int(path)},
+                        "landsat:wrs_row": {"eq": int(row)},
+                    },
+                )
                 feats.extend(res.get("features", []) or [])
-                res2 = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                      query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}})
+                res2 = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=args.limit,
+                    query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}},
+                )
                 feats.extend(res2.get("features", []) or [])
             else:
                 base_filt = _filter_for_tile(path, row, start_iso, end_iso, None)
-                res = client.search_cql2(collections=[coll], filter_obj=base_filt, limit=args.limit)
+                res = client.search_cql2(
+                    collections=[coll], filter_obj=base_filt, limit=args.limit
+                )
                 feats.extend(res.get("features", []) or [])
     else:
         if is_earthsearch:
-            res = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=args.limit,
-                                 query={"landsat:wrs_path": {"eq": int(path)}, "landsat:wrs_row": {"eq": int(row)}})
+            res = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=args.limit,
+                query={
+                    "landsat:wrs_path": {"eq": int(path)},
+                    "landsat:wrs_row": {"eq": int(row)},
+                },
+            )
             feats.extend(res.get("features", []) or [])
         else:
             base_filt = _filter_for_tile(path, row, start_iso, end_iso, None)
-            res = client.search_cql2(collections=None, filter_obj=base_filt, limit=args.limit)
+            res = client.search_cql2(
+                collections=None, filter_obj=base_filt, limit=args.limit
+            )
             feats.extend(res.get("features", []) or [])
 
     # Deduplicate by id
-    seen = set(); items = []
+    seen = set()
+    items = []
     for it in feats:
         iid = it.get("id")
         if iid and iid not in seen:
-            items.append(it); seen.add(iid)
+            items.append(it)
+            seen.add(iid)
 
     # Download selection
     dest_root = Path(args.dest)
@@ -482,12 +671,16 @@ def cmd_download_tile_metadata(args: argparse.Namespace) -> int:
     for it in items:
         full = _ensure_item_with_assets(client, args.stac_base, it)
         scene_id = full.get("id") or "unknown"
-        files = _select_assets_for_toa(full, also_angles=bool(args.also_angles), also_qa=bool(args.also_qa))
+        files = _select_assets_for_toa(
+            full, also_angles=bool(args.also_angles), also_qa=bool(args.also_qa)
+        )
         # Determine desired bands
         sensor = _infer_sensor(full)
-        desired = _parse_bands_arg(getattr(args, 'bands', None))
+        desired = _parse_bands_arg(getattr(args, "bands", None))
         if not desired:
-            desired = _default_bands_for_sensor(sensor, include_thermal=bool(args.thermal))
+            desired = _default_bands_for_sensor(
+                sensor, include_thermal=bool(args.thermal)
+            )
         band_files = _select_band_assets(full, desired)
         files.extend(band_files)
         if not files:
@@ -516,57 +709,143 @@ def cmd_download_tile_metadata(args: argparse.Namespace) -> int:
     return 0
 
 
-def _search_items_for_tile(base_url: str, client: STACClient, collections: List[str], tile_id: str, path: int, row: int, start_iso: str, end_iso: str, limit: int, use_bbox: bool, only_bbox: bool) -> List[dict]:
+def _search_items_for_tile(
+    base_url: str,
+    client: STACClient,
+    collections: List[str],
+    tile_id: str,
+    path: int,
+    row: int,
+    start_iso: str,
+    end_iso: str,
+    limit: int,
+    use_bbox: bool,
+    only_bbox: bool,
+) -> List[dict]:
     feats: List[dict] = []
-    is_earthsearch = ("earth-search" in (base_url or "")) or ("element84" in (base_url or ""))
-    bbox = get_tile_bbox(tile_id) if use_bbox and not only_bbox else (get_tile_bbox(tile_id) if only_bbox else None)
+    is_earthsearch = ("earth-search" in (base_url or "")) or (
+        "element84" in (base_url or "")
+    )
+    bbox = (
+        get_tile_bbox(tile_id)
+        if use_bbox and not only_bbox
+        else (get_tile_bbox(tile_id) if only_bbox else None)
+    )
     dt_range = f"{start_iso}/{end_iso}"
     if only_bbox:
         if collections:
             for coll in collections:
-                res = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit, query=None)
+                res = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=limit,
+                    query=None,
+                )
                 feats.extend(res.get("features", []) or [])
         else:
-            res = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit, query=None)
+            res = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=limit,
+                query=None,
+            )
             feats.extend(res.get("features", []) or [])
         return feats
 
     if collections:
         for coll in collections:
             if is_earthsearch:
-                res = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit,
-                                     query={"landsat:wrs_path": {"eq": int(path)}, "landsat:wrs_row": {"eq": int(row)}})
+                res = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=limit,
+                    query={
+                        "landsat:wrs_path": {"eq": int(path)},
+                        "landsat:wrs_row": {"eq": int(row)},
+                    },
+                )
                 feats.extend(res.get("features", []) or [])
-                res2 = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit,
-                                      query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}})
+                res2 = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=limit,
+                    query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}},
+                )
                 feats.extend(res2.get("features", []) or [])
-                res3 = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit,
-                                      query={"wrs:path": {"eq": int(path)}, "wrs:row": {"eq": int(row)}})
+                res3 = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=limit,
+                    query={"wrs:path": {"eq": int(path)}, "wrs:row": {"eq": int(row)}},
+                )
                 feats.extend(res3.get("features", []) or [])
-                res4 = client.search(collections=[coll], bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit,
-                                      query={"landsat:path": {"eq": int(path)}, "landsat:row": {"eq": int(row)}})
+                res4 = client.search(
+                    collections=[coll],
+                    bbox=list(bbox) if bbox else None,
+                    datetime_range=dt_range,
+                    limit=limit,
+                    query={
+                        "landsat:path": {"eq": int(path)},
+                        "landsat:row": {"eq": int(row)},
+                    },
+                )
                 feats.extend(res4.get("features", []) or [])
             else:
                 base_filt = _filter_for_tile(path, row, start_iso, end_iso, None)
-                res = client.search_cql2(collections=[coll], filter_obj=base_filt, limit=limit)
+                res = client.search_cql2(
+                    collections=[coll], filter_obj=base_filt, limit=limit
+                )
                 feats.extend(res.get("features", []) or [])
     else:
         if is_earthsearch:
-            res = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit,
-                                 query={"landsat:wrs_path": {"eq": int(path)}, "landsat:wrs_row": {"eq": int(row)}})
+            res = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=limit,
+                query={
+                    "landsat:wrs_path": {"eq": int(path)},
+                    "landsat:wrs_row": {"eq": int(row)},
+                },
+            )
             feats.extend(res.get("features", []) or [])
-            res2 = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit,
-                                  query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}})
+            res2 = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=limit,
+                query={"wrs_path": {"eq": int(path)}, "wrs_row": {"eq": int(row)}},
+            )
             feats.extend(res2.get("features", []) or [])
-            res3 = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit,
-                                  query={"wrs:path": {"eq": int(path)}, "wrs:row": {"eq": int(row)}})
+            res3 = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=limit,
+                query={"wrs:path": {"eq": int(path)}, "wrs:row": {"eq": int(row)}},
+            )
             feats.extend(res3.get("features", []) or [])
-            res4 = client.search(collections=None, bbox=list(bbox) if bbox else None, datetime_range=dt_range, limit=limit,
-                                  query={"landsat:path": {"eq": int(path)}, "landsat:row": {"eq": int(row)}})
+            res4 = client.search(
+                collections=None,
+                bbox=list(bbox) if bbox else None,
+                datetime_range=dt_range,
+                limit=limit,
+                query={
+                    "landsat:path": {"eq": int(path)},
+                    "landsat:row": {"eq": int(row)},
+                },
+            )
             feats.extend(res4.get("features", []) or [])
         else:
             base_filt = _filter_for_tile(path, row, start_iso, end_iso, None)
-            res = client.search_cql2(collections=None, filter_obj=base_filt, limit=limit)
+            res = client.search_cql2(
+                collections=None, filter_obj=base_filt, limit=limit
+            )
             feats.extend(res.get("features", []) or [])
     return feats
 
@@ -574,11 +853,15 @@ def _search_items_for_tile(base_url: str, client: STACClient, collections: List[
 def cmd_bulk_download(args: argparse.Namespace) -> int:
     start_iso, end_iso = _parse_dates(args)
     client = STACClient(base_url=args.stac_base)
-    collections = _collections_for_server(args.stac_base, args.sensors, args.collections)
+    collections = _collections_for_server(
+        args.stac_base, args.sensors, args.collections
+    )
 
     dest_root = Path(args.dest)
     manifest_rows: List[Tuple[str, str, str]] = []  # tile_id, scene_id, local_path
-    summary_rows: List[Tuple[str, int, int]] = []   # tile_id, items_found, files_downloaded
+    summary_rows: List[Tuple[str, int, int]] = (
+        []
+    )  # tile_id, items_found, files_downloaded
     processed = 0
     tiles_with_data = 0
 
@@ -587,22 +870,50 @@ def cmd_bulk_download(args: argparse.Namespace) -> int:
         if args.max_tiles and processed > args.max_tiles:
             break
         path, row = tile.path, tile.row
-        feats = _search_items_for_tile(args.stac_base, client, collections, tile.tile_id, path, row, start_iso, end_iso, args.per_tile_limit, use_bbox=not args.no_bbox, only_bbox=bool(args.only_bbox))
+        feats = _search_items_for_tile(
+            args.stac_base,
+            client,
+            collections,
+            tile.tile_id,
+            path,
+            row,
+            start_iso,
+            end_iso,
+            args.per_tile_limit,
+            use_bbox=not args.no_bbox,
+            only_bbox=bool(args.only_bbox),
+        )
         # Optional fallback STAC base if nothing found
-        if (not feats) and getattr(args, 'fallback_stac', None):
+        if (not feats) and getattr(args, "fallback_stac", None):
             try:
                 fb_base = args.fallback_stac
                 fb_client = STACClient(base_url=fb_base)
-                fb_cols = _collections_for_server(fb_base, args.sensors, args.collections)
-                feats = _search_items_for_tile(fb_base, fb_client, fb_cols, tile.tile_id, path, row, start_iso, end_iso, args.per_tile_limit, use_bbox=not args.no_bbox, only_bbox=bool(args.only_bbox))
+                fb_cols = _collections_for_server(
+                    fb_base, args.sensors, args.collections
+                )
+                feats = _search_items_for_tile(
+                    fb_base,
+                    fb_client,
+                    fb_cols,
+                    tile.tile_id,
+                    path,
+                    row,
+                    start_iso,
+                    end_iso,
+                    args.per_tile_limit,
+                    use_bbox=not args.no_bbox,
+                    only_bbox=bool(args.only_bbox),
+                )
             except Exception as e:
                 print(f"Fallback search failed for {tile.tile_id}: {e}")
         # Dedup by id
-        seen=set(); items=[]
+        seen = set()
+        items = []
         for it in feats:
             iid = it.get("id")
             if iid and iid not in seen:
-                items.append(it); seen.add(iid)
+                items.append(it)
+                seen.add(iid)
         if not items:
             summary_rows.append((tile.tile_id, 0, 0))
             continue
@@ -614,11 +925,15 @@ def cmd_bulk_download(args: argparse.Namespace) -> int:
             full = _ensure_item_with_assets(client, args.stac_base, it)
             scene_id = full.get("id") or "unknown"
             # Select assets
-            base_files = _select_assets_for_toa(full, also_angles=bool(args.also_angles), also_qa=bool(args.also_qa))
+            base_files = _select_assets_for_toa(
+                full, also_angles=bool(args.also_angles), also_qa=bool(args.also_qa)
+            )
             sensor = _infer_sensor(full)
-            desired = _parse_bands_arg(getattr(args, 'bands', None))
+            desired = _parse_bands_arg(getattr(args, "bands", None))
             if not desired:
-                desired = _default_bands_for_sensor(sensor, include_thermal=bool(args.thermal))
+                desired = _default_bands_for_sensor(
+                    sensor, include_thermal=bool(args.thermal)
+                )
             band_files = _select_band_assets(full, desired)
             files = base_files + band_files
             if not files:
@@ -639,7 +954,8 @@ def cmd_bulk_download(args: argparse.Namespace) -> int:
 
     # Write manifests
     if args.manifest_csv:
-        p = Path(args.manifest_csv); p.parent.mkdir(parents=True, exist_ok=True)
+        p = Path(args.manifest_csv)
+        p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["tile_id", "scene_id", "local_path"])
@@ -647,87 +963,270 @@ def cmd_bulk_download(args: argparse.Namespace) -> int:
                 w.writerow(list(r))
         print(f"Wrote manifest CSV: {args.manifest_csv}")
     if args.summary_csv:
-        p = Path(args.summary_csv); p.parent.mkdir(parents=True, exist_ok=True)
+        p = Path(args.summary_csv)
+        p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["tile_id", "items_found", "files_downloaded"])
             for r in summary_rows:
                 w.writerow(list(r))
         print(f"Wrote summary CSV: {args.summary_csv}")
-    print(f"Bulk download complete. Tiles with data: {tiles_with_data}; Files downloaded: {sum(x[2] for x in summary_rows)}")
+    print(
+        f"Bulk download complete. Tiles with data: {tiles_with_data}; Files downloaded: {sum(x[2] for x in summary_rows)}"
+    )
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Summarize TOA (Landsat C2 L1) availability per AU tile via STAC")
+    p = argparse.ArgumentParser(
+        description="Summarize TOA (Landsat C2 L1) availability per AU tile via STAC"
+    )
     sub = p.add_subparsers(dest="cmd", required=False)
 
     # Default (summary for all tiles)
     p.add_argument("--start", help="Start date YYYY-MM-DD")
     p.add_argument("--end", help="End date YYYY-MM-DD")
-    p.add_argument("--years-back", type=float, default=2.0, dest="years_back", help="If start/end not given, look back this many years (default 2)")
-    p.add_argument("--stac-base", default="https://landsatlook.usgs.gov/stac-server", help="STAC API base URL")
-    p.add_argument("--collections", nargs="+", help="Explicit STAC collection IDs (overrides --sensors)")
-    p.add_argument("--sensors", nargs="+", choices=["l5","l7","l8","l9"], help="Landsat sensors to include (maps to server collections)")
-    p.add_argument("--limit", type=int, default=200, help="Max items to fetch per tile (sufficient for ~2 years)")
-    p.add_argument("--csv", help="Optional path to write CSV summary, e.g., data/aus_lsat_tile_summary.csv")
-    p.add_argument("--max-tiles", type=int, help="Optional cap on number of tiles to process (for testing)")
+    p.add_argument(
+        "--years-back",
+        type=float,
+        default=2.0,
+        dest="years_back",
+        help="If start/end not given, look back this many years (default 2)",
+    )
+    p.add_argument(
+        "--stac-base",
+        default="https://landsatlook.usgs.gov/stac-server",
+        help="STAC API base URL",
+    )
+    p.add_argument(
+        "--collections",
+        nargs="+",
+        help="Explicit STAC collection IDs (overrides --sensors)",
+    )
+    p.add_argument(
+        "--sensors",
+        nargs="+",
+        choices=["l5", "l7", "l8", "l9"],
+        help="Landsat sensors to include (maps to server collections)",
+    )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="Max items to fetch per tile (sufficient for ~2 years)",
+    )
+    p.add_argument(
+        "--csv",
+        help="Optional path to write CSV summary, e.g., data/aus_lsat_tile_summary.csv",
+    )
+    p.add_argument(
+        "--max-tiles",
+        type=int,
+        help="Optional cap on number of tiles to process (for testing)",
+    )
 
     # Subcommand: list items for a single tile
-    p_list = sub.add_parser("list-tile", help="List per-item TOA rows for one tile (one row per scene)")
+    p_list = sub.add_parser(
+        "list-tile", help="List per-item TOA rows for one tile (one row per scene)"
+    )
     p_list.add_argument("tile_id", help="Tile ID PPPRRR or PPP_RRR")
     p_list.add_argument("--start", help="Start date YYYY-MM-DD")
     p_list.add_argument("--end", help="End date YYYY-MM-DD")
-    p_list.add_argument("--years-back", type=float, default=2.0, dest="years_back", help="If start/end not given, look back this many years (default 2)")
-    p_list.add_argument("--stac-base", default="https://earth-search.aws.element84.com/v1", help="STAC API base URL")
-    p_list.add_argument("--collections", nargs="+", help="Explicit STAC collection IDs (overrides --sensors)")
-    p_list.add_argument("--sensors", nargs="+", choices=["l5","l7","l8","l9"], default=["l5","l7","l8","l9"], help="Sensors to include")
-    p_list.add_argument("--limit", type=int, default=500, help="Max items to fetch for the tile")
-    p_list.add_argument("--no-bbox", action="store_true", help="Do not apply tile bbox spatial filter (use only path/row)")
-    p_list.add_argument("--only-bbox", action="store_true", help="Use only bbox + datetime filter (ignore path/row)")
+    p_list.add_argument(
+        "--years-back",
+        type=float,
+        default=2.0,
+        dest="years_back",
+        help="If start/end not given, look back this many years (default 2)",
+    )
+    p_list.add_argument(
+        "--stac-base",
+        default="https://earth-search.aws.element84.com/v1",
+        help="STAC API base URL",
+    )
+    p_list.add_argument(
+        "--collections",
+        nargs="+",
+        help="Explicit STAC collection IDs (overrides --sensors)",
+    )
+    p_list.add_argument(
+        "--sensors",
+        nargs="+",
+        choices=["l5", "l7", "l8", "l9"],
+        default=["l5", "l7", "l8", "l9"],
+        help="Sensors to include",
+    )
+    p_list.add_argument(
+        "--limit", type=int, default=500, help="Max items to fetch for the tile"
+    )
+    p_list.add_argument(
+        "--no-bbox",
+        action="store_true",
+        help="Do not apply tile bbox spatial filter (use only path/row)",
+    )
+    p_list.add_argument(
+        "--only-bbox",
+        action="store_true",
+        help="Use only bbox + datetime filter (ignore path/row)",
+    )
     p_list.add_argument("--csv", help="Optional CSV path to write per-item rows")
     p_list.set_defaults(func=cmd_list_tile_items)
 
     # Subcommand: download minimal TOA metadata (MTL) per scene for one tile
-    p_dl = sub.add_parser("download-tile", help="Download TOA-needed metadata (MTL) for a tile over a date range")
+    p_dl = sub.add_parser(
+        "download-tile",
+        help="Download TOA-needed metadata (MTL) for a tile over a date range",
+    )
     p_dl.add_argument("tile_id", help="Tile ID PPPRRR or PPP_RRR")
     p_dl.add_argument("--start", help="Start date YYYY-MM-DD")
     p_dl.add_argument("--end", help="End date YYYY-MM-DD")
-    p_dl.add_argument("--years-back", type=float, default=2.0, dest="years_back", help="If start/end not given, look back this many years (default 2)")
-    p_dl.add_argument("--stac-base", default="https://landsatlook.usgs.gov/stac-server", help="STAC API base URL")
-    p_dl.add_argument("--collections", nargs="+", help="Explicit STAC collection IDs (overrides --sensors)")
-    p_dl.add_argument("--sensors", nargs="+", choices=["l5","l7","l8","l9"], help="Sensors to include")
-    p_dl.add_argument("--limit", type=int, default=2000, help="Max items to fetch for the tile")
-    p_dl.add_argument("--no-bbox", action="store_true", help="Do not apply tile bbox spatial filter (use only path/row)")
-    p_dl.add_argument("--dest", default="data/landsat_toa", help="Destination directory for downloads")
-    p_dl.add_argument("--also-angles", action="store_true", help="Also download ANG file if available")
-    p_dl.add_argument("--also-qa", action="store_true", help="Also download QA_PIXEL/QA_RADSAT if available")
-    p_dl.add_argument("--bands", nargs="+", help="Band IDs to download (e.g., B2 B3 B4 B5 B6 B7). If omitted, choose typical reflectance bands per sensor.")
-    p_dl.add_argument("--thermal", action="store_true", help="Include thermal bands (e.g., B10/B11 for L8/9 or B6 for L7/5)")
+    p_dl.add_argument(
+        "--years-back",
+        type=float,
+        default=2.0,
+        dest="years_back",
+        help="If start/end not given, look back this many years (default 2)",
+    )
+    p_dl.add_argument(
+        "--stac-base",
+        default="https://landsatlook.usgs.gov/stac-server",
+        help="STAC API base URL",
+    )
+    p_dl.add_argument(
+        "--collections",
+        nargs="+",
+        help="Explicit STAC collection IDs (overrides --sensors)",
+    )
+    p_dl.add_argument(
+        "--sensors",
+        nargs="+",
+        choices=["l5", "l7", "l8", "l9"],
+        help="Sensors to include",
+    )
+    p_dl.add_argument(
+        "--limit", type=int, default=2000, help="Max items to fetch for the tile"
+    )
+    p_dl.add_argument(
+        "--no-bbox",
+        action="store_true",
+        help="Do not apply tile bbox spatial filter (use only path/row)",
+    )
+    p_dl.add_argument(
+        "--dest", default="data/landsat_toa", help="Destination directory for downloads"
+    )
+    p_dl.add_argument(
+        "--also-angles", action="store_true", help="Also download ANG file if available"
+    )
+    p_dl.add_argument(
+        "--also-qa",
+        action="store_true",
+        help="Also download QA_PIXEL/QA_RADSAT if available",
+    )
+    p_dl.add_argument(
+        "--bands",
+        nargs="+",
+        help="Band IDs to download (e.g., B2 B3 B4 B5 B6 B7). If omitted, choose typical reflectance bands per sensor.",
+    )
+    p_dl.add_argument(
+        "--thermal",
+        action="store_true",
+        help="Include thermal bands (e.g., B10/B11 for L8/9 or B6 for L7/5)",
+    )
     p_dl.add_argument("--csv", help="Optional CSV mapping scene_id -> local file path")
     p_dl.set_defaults(func=cmd_download_tile_metadata)
 
     # Subcommand: bulk download across many AU tiles
-    p_bulk = sub.add_parser("bulk-download", help="Bulk download TOA-ready assets across many tiles")
+    p_bulk = sub.add_parser(
+        "bulk-download", help="Bulk download TOA-ready assets across many tiles"
+    )
     p_bulk.add_argument("--start", help="Start date YYYY-MM-DD")
     p_bulk.add_argument("--end", help="End date YYYY-MM-DD")
-    p_bulk.add_argument("--years-back", type=float, default=2.0, dest="years_back", help="If start/end not given, look back this many years (default 2)")
-    p_bulk.add_argument("--stac-base", default="https://landsatlook.usgs.gov/stac-server", help="Primary STAC API base URL")
-    p_bulk.add_argument("--fallback-stac", help="Optional fallback STAC base URL used when a tile returns zero items on the primary")
-    p_bulk.add_argument("--collections", nargs="+", help="Explicit STAC collection IDs (overrides --sensors)")
-    p_bulk.add_argument("--sensors", nargs="+", choices=["l5","l7","l8","l9"], help="Sensors to include (maps to server collections)")
-    p_bulk.add_argument("--per-tile-limit", type=int, default=500, dest="per_tile_limit", help="Max items to download per tile")
-    p_bulk.add_argument("--first-n-tiles", type=int, dest="first_n_tiles", help="Stop after downloading from this many tiles with data (useful for sampling)")
-    p_bulk.add_argument("--max-tiles", type=int, help="Optional cap on number of tiles to scan (process order is path/row ascending)")
-    p_bulk.add_argument("--no-bbox", action="store_true", help="Do not apply tile bbox spatial filter (use only path/row)")
-    p_bulk.add_argument("--only-bbox", action="store_true", help="Use only bbox + datetime filter (ignore path/row)")
-    p_bulk.add_argument("--dest", default="data/landsat_toa", help="Destination directory for downloads")
-    p_bulk.add_argument("--also-angles", action="store_true", help="Also download ANG file if available")
-    p_bulk.add_argument("--also-qa", action="store_true", help="Also download QA_PIXEL/QA_RADSAT if available")
-    p_bulk.add_argument("--bands", nargs="+", help="Band IDs to download (e.g., B2 B3 B4 B5 B6 B7). If omitted, choose typical reflectance bands per sensor.")
-    p_bulk.add_argument("--thermal", action="store_true", help="Include thermal bands (e.g., B10/B11 for L8/9 or B6 for L7/5)")
-    p_bulk.add_argument("--manifest-csv", dest="manifest_csv", help="Write global manifest CSV: tile_id,scene_id,local_path")
-    p_bulk.add_argument("--summary-csv", dest="summary_csv", help="Write per-tile summary CSV: tile_id,items_found,files_downloaded")
+    p_bulk.add_argument(
+        "--years-back",
+        type=float,
+        default=2.0,
+        dest="years_back",
+        help="If start/end not given, look back this many years (default 2)",
+    )
+    p_bulk.add_argument(
+        "--stac-base",
+        default="https://landsatlook.usgs.gov/stac-server",
+        help="Primary STAC API base URL",
+    )
+    p_bulk.add_argument(
+        "--fallback-stac",
+        help="Optional fallback STAC base URL used when a tile returns zero items on the primary",
+    )
+    p_bulk.add_argument(
+        "--collections",
+        nargs="+",
+        help="Explicit STAC collection IDs (overrides --sensors)",
+    )
+    p_bulk.add_argument(
+        "--sensors",
+        nargs="+",
+        choices=["l5", "l7", "l8", "l9"],
+        help="Sensors to include (maps to server collections)",
+    )
+    p_bulk.add_argument(
+        "--per-tile-limit",
+        type=int,
+        default=500,
+        dest="per_tile_limit",
+        help="Max items to download per tile",
+    )
+    p_bulk.add_argument(
+        "--first-n-tiles",
+        type=int,
+        dest="first_n_tiles",
+        help="Stop after downloading from this many tiles with data (useful for sampling)",
+    )
+    p_bulk.add_argument(
+        "--max-tiles",
+        type=int,
+        help="Optional cap on number of tiles to scan (process order is path/row ascending)",
+    )
+    p_bulk.add_argument(
+        "--no-bbox",
+        action="store_true",
+        help="Do not apply tile bbox spatial filter (use only path/row)",
+    )
+    p_bulk.add_argument(
+        "--only-bbox",
+        action="store_true",
+        help="Use only bbox + datetime filter (ignore path/row)",
+    )
+    p_bulk.add_argument(
+        "--dest", default="data/landsat_toa", help="Destination directory for downloads"
+    )
+    p_bulk.add_argument(
+        "--also-angles", action="store_true", help="Also download ANG file if available"
+    )
+    p_bulk.add_argument(
+        "--also-qa",
+        action="store_true",
+        help="Also download QA_PIXEL/QA_RADSAT if available",
+    )
+    p_bulk.add_argument(
+        "--bands",
+        nargs="+",
+        help="Band IDs to download (e.g., B2 B3 B4 B5 B6 B7). If omitted, choose typical reflectance bands per sensor.",
+    )
+    p_bulk.add_argument(
+        "--thermal",
+        action="store_true",
+        help="Include thermal bands (e.g., B10/B11 for L8/9 or B6 for L7/5)",
+    )
+    p_bulk.add_argument(
+        "--manifest-csv",
+        dest="manifest_csv",
+        help="Write global manifest CSV: tile_id,scene_id,local_path",
+    )
+    p_bulk.add_argument(
+        "--summary-csv",
+        dest="summary_csv",
+        help="Write per-tile summary CSV: tile_id,items_found,files_downloaded",
+    )
     p_bulk.set_defaults(func=cmd_bulk_download)
 
     return p
@@ -744,7 +1243,9 @@ def main(argv=None) -> int:
     # Default: summary across all tiles
     start_iso, end_iso = _parse_dates(args)
     client = STACClient(base_url=args.stac_base)
-    collections = _collections_for_server(args.stac_base, args.sensors, args.collections)
+    collections = _collections_for_server(
+        args.stac_base, args.sensors, args.collections
+    )
 
     summaries: List[TileSummary] = []
     total = 0
@@ -755,7 +1256,10 @@ def main(argv=None) -> int:
         try:
             s = summarize_tile(client, t, start_iso, end_iso, collections, args.limit)
             summaries.append(s)
-            print(f"{s.tile_id} ({s.path:03d}/{s.row:03d}) -> {s.count} items" + (f" [{s.first_date} .. {s.last_date}]" if s.count > 0 else ""))
+            print(
+                f"{s.tile_id} ({s.path:03d}/{s.row:03d}) -> {s.count} items"
+                + (f" [{s.first_date} .. {s.last_date}]" if s.count > 0 else "")
+            )
         except Exception as e:
             print(f"{t.tile_id} ({t.path:03d}/{t.row:03d}) -> ERROR: {e}")
 

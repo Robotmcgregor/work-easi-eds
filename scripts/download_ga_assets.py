@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import sys
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -30,7 +31,7 @@ from src.utils.s3_client import S3Client
 
 def _candidate_prefixes(tile: str, base_prefix: Optional[str]) -> List[str]:
     tile = tile.strip()
-    if '_' not in tile and len(tile) == 6 and tile.isdigit():
+    if "_" not in tile and len(tile) == 6 and tile.isdigit():
         tile_pp_rr = f"{tile[:3]}_{tile[3:]}"
     else:
         tile_pp_rr = tile
@@ -45,7 +46,9 @@ def _ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
-def _download_fc(s3: S3Client, prefixes: List[str], tile: str, dates: List[str], dest_root: Path) -> int:
+def _download_fc(
+    s3: S3Client, prefixes: List[str], tile: str, dates: List[str], dest_root: Path
+) -> int:
     downloaded = 0
     for date in dates:
         target_suffixes = [f"_{date}_fc3ms.tif", f"_{date}_fc3ms_clr.tif"]
@@ -74,7 +77,9 @@ def _download_fc(s3: S3Client, prefixes: List[str], tile: str, dates: List[str],
     return downloaded
 
 
-def _download_sr(s3: S3Client, prefixes: List[str], tile: str, dates: List[str], dest_root: Path) -> int:
+def _download_sr(
+    s3: S3Client, prefixes: List[str], tile: str, dates: List[str], dest_root: Path
+) -> int:
     downloaded = 0
     for date in dates:
         scene = f"p{tile.replace('_','r')}"
@@ -92,7 +97,9 @@ def _download_sr(s3: S3Client, prefixes: List[str], tile: str, dates: List[str],
         for suf, key in found.items():
             if key:
                 try:
-                    s3.download(key, str(dest_dir / os.path.basename(key)), overwrite=False)
+                    s3.download(
+                        key, str(dest_dir / os.path.basename(key)), overwrite=False
+                    )
                     print(str(dest_dir / os.path.basename(key)))
                     downloaded += 1
                     any_found = True
@@ -104,37 +111,53 @@ def _download_sr(s3: S3Client, prefixes: List[str], tile: str, dates: List[str],
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Download GA FC or SR assets from S3 for a tile/date list")
+    ap = argparse.ArgumentParser(
+        description="Download GA FC or SR assets from S3 for a tile/date list"
+    )
     sub = ap.add_subparsers(dest="mode", required=True)
 
     ap_fc = sub.add_parser("fc", help="Download Fractional Cover fc3ms files")
-    ap_fc.add_argument("--tile", required=True, help="Tile prefix PPP_RRR or PPPRRR (e.g., 089_080)")
+    ap_fc.add_argument(
+        "--tile", required=True, help="Tile prefix PPP_RRR or PPPRRR (e.g., 089_080)"
+    )
     ap_fc.add_argument("--dates", required=True, help="Comma-separated YYYYMMDD list")
     ap_fc.add_argument("--dest", default="data/source", help="Destination root")
 
     ap_sr = sub.add_parser("sr", help="Download Surface Reflectance srb2..srb7 files")
-    ap_sr.add_argument("--tile", required=True, help="Tile prefix PPP_RRR or PPPRRR (e.g., 089_080)")
+    ap_sr.add_argument(
+        "--tile", required=True, help="Tile prefix PPP_RRR or PPPRRR (e.g., 089_080)"
+    )
     ap_sr.add_argument("--dates", required=True, help="Comma-separated YYYYMMDD list")
     ap_sr.add_argument("--dest", default="data/source", help="Destination root")
 
     # Common S3 args
     for p in (ap_fc, ap_sr):
         p.add_argument("--bucket", default=os.getenv("S3_BUCKET", ""))
-        p.add_argument("--region", default=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "")))
+        p.add_argument(
+            "--region",
+            default=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "")),
+        )
         p.add_argument("--profile", default=os.getenv("AWS_PROFILE", ""))
         p.add_argument("--endpoint", default=os.getenv("S3_ENDPOINT_URL", ""))
-        p.add_argument("--role-arn", dest="role_arn", default=os.getenv("S3_ROLE_ARN", ""))
+        p.add_argument(
+            "--role-arn", dest="role_arn", default=os.getenv("S3_ROLE_ARN", "")
+        )
         p.add_argument("--base-prefix", default=os.getenv("S3_BASE_PREFIX", ""))
 
     args = ap.parse_args(argv)
     if not args.bucket:
         raise SystemExit("--bucket not provided and S3_BUCKET not set in environment")
 
-    s3 = S3Client(bucket=args.bucket, region=args.region or "", profile=args.profile or "",
-                  endpoint_url=args.endpoint or "", role_arn=args.role_arn or "")
+    s3 = S3Client(
+        bucket=args.bucket,
+        region=args.region or "",
+        profile=args.profile or "",
+        endpoint_url=args.endpoint or "",
+        role_arn=args.role_arn or "",
+    )
 
     prefixes = _candidate_prefixes(args.tile, args.base_prefix or None)
-    dates = [d.strip() for d in args.dates.split(',') if d.strip()]
+    dates = [d.strip() for d in args.dates.split(",") if d.strip()]
     dest_root = Path(args.dest)
 
     if args.mode == "fc":

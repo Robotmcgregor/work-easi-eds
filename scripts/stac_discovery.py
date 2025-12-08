@@ -40,16 +40,30 @@ def cmd_search_bbox(args: argparse.Namespace) -> int:
         "op": "and",
         "args": [
             {"op": "between", "args": [{"property": "datetime"}, start_iso, end_iso]},
-            {"op": "s_intersects", "args": [
-                {"property": "geometry"},
-                {"type": "Polygon", "coordinates": [[
-                    [bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]], [bbox[0], bbox[1]]
-                ]]}
-            ]},
-            {"op": "<", "args": [{"property": "eo:cloud_cover"}, 100]}
-        ]
+            {
+                "op": "s_intersects",
+                "args": [
+                    {"property": "geometry"},
+                    {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [bbox[0], bbox[1]],
+                                [bbox[2], bbox[1]],
+                                [bbox[2], bbox[3]],
+                                [bbox[0], bbox[3]],
+                                [bbox[0], bbox[1]],
+                            ]
+                        ],
+                    },
+                ],
+            },
+            {"op": "<", "args": [{"property": "eo:cloud_cover"}, 100]},
+        ],
     }
-    res = client.search_cql2(collections=collections, filter_obj=filter_obj, limit=args.limit)
+    res = client.search_cql2(
+        collections=collections, filter_obj=filter_obj, limit=args.limit
+    )
     feats = res.get("features", [])
     print(f"Found {len(feats)} STAC item(s)")
     for it in feats:
@@ -59,6 +73,7 @@ def cmd_search_bbox(args: argparse.Namespace) -> int:
 
 def cmd_search_recent(args: argparse.Namespace) -> int:
     from datetime import timedelta, date
+
     client = STACClient()
     end = date.today()
     start = end - timedelta(days=args.days)
@@ -69,10 +84,12 @@ def cmd_search_recent(args: argparse.Namespace) -> int:
         "op": "and",
         "args": [
             {"op": "between", "args": [{"property": "datetime"}, start_iso, end_iso]},
-            {"op": "<", "args": [{"property": "eo:cloud_cover"}, 100]}
-        ]
+            {"op": "<", "args": [{"property": "eo:cloud_cover"}, 100]},
+        ],
     }
-    res = client.search_cql2(collections=collections, filter_obj=filter_obj, limit=args.limit)
+    res = client.search_cql2(
+        collections=collections, filter_obj=filter_obj, limit=args.limit
+    )
     feats = res.get("features", [])
     print(f"Found {len(feats)} recent STAC item(s)")
     for it in feats:
@@ -104,14 +121,18 @@ def cmd_search_tile(args: argparse.Namespace) -> int:
             {"op": "=", "args": [{"property": "landsat:wrs_path"}, path]},
             {"op": "=", "args": [{"property": "landsat:wrs_row"}, row]},
             {"op": "<", "args": [{"property": "eo:cloud_cover"}, args.cloud_lt]},
-        ]
+        ],
     }
-    res = client.search_cql2(collections=collections, filter_obj=filter_obj, limit=args.limit)
+    res = client.search_cql2(
+        collections=collections, filter_obj=filter_obj, limit=args.limit
+    )
     feats = res.get("features", [])
     print(f"Found {len(feats)} STAC item(s) for tile {args.tile_id}")
     for it in feats:
         props = it.get("properties", {})
-        print(it.get("id"), props.get("datetime"), f"cloud={props.get('eo:cloud_cover')}")
+        print(
+            it.get("id"), props.get("datetime"), f"cloud={props.get('eo:cloud_cover')}"
+        )
     return 0
 
 
@@ -119,7 +140,9 @@ def cmd_search_bbox_tile(args: argparse.Namespace) -> int:
     client = STACClient()
     bbox = get_tile_bbox(args.tile_id)
     if not bbox:
-        print(f"No bbox found in DB for tile {args.tile_id}. Run bbox import (see README-create-bbox.md).")
+        print(
+            f"No bbox found in DB for tile {args.tile_id}. Run bbox import (see README-create-bbox.md)."
+        )
         return 2
     min_lon, min_lat, max_lon, max_lat = bbox
     start_end = _date_range(args.start, args.end).split("/")
@@ -129,21 +152,37 @@ def cmd_search_bbox_tile(args: argparse.Namespace) -> int:
         "op": "and",
         "args": [
             {"op": "between", "args": [{"property": "datetime"}, start_iso, end_iso]},
-            {"op": "s_intersects", "args": [
-                {"property": "geometry"},
-                {"type": "Polygon", "coordinates": [[
-                    [min_lon, min_lat], [max_lon, min_lat], [max_lon, max_lat], [min_lon, max_lat], [min_lon, min_lat]
-                ]]}
-            ]},
-            {"op": "<", "args": [{"property": "eo:cloud_cover"}, 100]}
-        ]
+            {
+                "op": "s_intersects",
+                "args": [
+                    {"property": "geometry"},
+                    {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [min_lon, min_lat],
+                                [max_lon, min_lat],
+                                [max_lon, max_lat],
+                                [min_lon, max_lat],
+                                [min_lon, min_lat],
+                            ]
+                        ],
+                    },
+                ],
+            },
+            {"op": "<", "args": [{"property": "eo:cloud_cover"}, 100]},
+        ],
     }
-    res = client.search_cql2(collections=collections, filter_obj=filter_obj, limit=args.limit)
+    res = client.search_cql2(
+        collections=collections, filter_obj=filter_obj, limit=args.limit
+    )
     feats = res.get("features", [])
     print(f"Found {len(feats)} STAC item(s) for tile {args.tile_id}")
     for it in feats:
         props = it.get("properties", {})
-        print(it.get("id"), props.get("datetime"), f"cloud={props.get('eo:cloud_cover')}")
+        print(
+            it.get("id"), props.get("datetime"), f"cloud={props.get('eo:cloud_cover')}"
+        )
     return 0
 
 
@@ -153,7 +192,7 @@ def cmd_collections(args: argparse.Namespace) -> int:
     coll_list = cols.get("collections", [])
     print(f"Found {len(coll_list)} collection(s)")
     for c in coll_list:
-        print(c.get("id"), '-', c.get("title") or '')
+        print(c.get("id"), "-", c.get("title") or "")
     return 0
 
 
@@ -161,40 +200,54 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Landsat STAC discovery")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    p_bbox = sub.add_parser("search-bbox", help="Search Landsat STAC by bbox and date range")
+    p_bbox = sub.add_parser(
+        "search-bbox", help="Search Landsat STAC by bbox and date range"
+    )
     p_bbox.add_argument("--start", required=True)
     p_bbox.add_argument("--end", required=True)
     p_bbox.add_argument("--min-lon", type=float, dest="min_lon", required=True)
     p_bbox.add_argument("--min-lat", type=float, dest="min_lat", required=True)
     p_bbox.add_argument("--max-lon", type=float, dest="max_lon", required=True)
     p_bbox.add_argument("--max-lat", type=float, dest="max_lat", required=True)
-    p_bbox.add_argument("--collections", nargs="+", help="STAC collections (omit to search all)")
+    p_bbox.add_argument(
+        "--collections", nargs="+", help="STAC collections (omit to search all)"
+    )
     p_bbox.add_argument("--limit", type=int, default=10)
     p_bbox.set_defaults(func=cmd_search_bbox)
 
     p_recent = sub.add_parser("search-recent", help="List recent Landsat STAC items")
     p_recent.add_argument("--days", type=int, default=30)
-    p_recent.add_argument("--collections", nargs="+", help="STAC collections (omit to search all)")
+    p_recent.add_argument(
+        "--collections", nargs="+", help="STAC collections (omit to search all)"
+    )
     p_recent.add_argument("--limit", type=int, default=20)
     p_recent.set_defaults(func=cmd_search_recent)
 
-    p_tile = sub.add_parser("search-tile", help="Search by WRS-2 tile (PPPRRR or PPP_RRR) and date range")
+    p_tile = sub.add_parser(
+        "search-tile", help="Search by WRS-2 tile (PPPRRR or PPP_RRR) and date range"
+    )
     p_tile.add_argument("tile_id")
     p_tile.add_argument("--start", required=True)
     p_tile.add_argument("--end", required=True)
     p_tile.add_argument("--cloud-lt", type=int, default=100, dest="cloud_lt")
-    p_tile.add_argument("--collections", nargs="+", help="STAC collections (omit to search all)")
+    p_tile.add_argument(
+        "--collections", nargs="+", help="STAC collections (omit to search all)"
+    )
     p_tile.add_argument("--limit", type=int, default=20)
     p_tile.set_defaults(func=cmd_search_tile)
 
     p_cols = sub.add_parser("collections", help="List available STAC collection IDs")
     p_cols.set_defaults(func=cmd_collections)
 
-    p_bbox_tile = sub.add_parser("search-bbox-tile", help="Search by DB bbox for tile and date range")
+    p_bbox_tile = sub.add_parser(
+        "search-bbox-tile", help="Search by DB bbox for tile and date range"
+    )
     p_bbox_tile.add_argument("tile_id")
     p_bbox_tile.add_argument("--start", required=True)
     p_bbox_tile.add_argument("--end", required=True)
-    p_bbox_tile.add_argument("--collections", nargs="+", help="STAC collections (omit to search all)")
+    p_bbox_tile.add_argument(
+        "--collections", nargs="+", help="STAC collections (omit to search all)"
+    )
     p_bbox_tile.add_argument("--limit", type=int, default=20)
     p_bbox_tile.set_defaults(func=cmd_search_bbox_tile)
 

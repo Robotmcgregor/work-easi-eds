@@ -55,6 +55,7 @@ if str(ROOT) not in sys.path:
 
 DEFAULT_THRESHOLDS = [34, 35, 36, 37, 38, 39]
 
+
 def run_cmd(cmd: List[str], dry_run: bool, step: str, results: dict) -> None:
     print(f"\n[STEP] {step}")
     print("Command:", " ".join(cmd))
@@ -75,15 +76,22 @@ def run_cmd(cmd: List[str], dry_run: bool, step: str, results: dict) -> None:
     import sys
 
     def main():
-        ap = argparse.ArgumentParser(description="Deprecated ads* master pipeline wrapper")
-        ap.add_argument('--allow-run-legacy', action='store_true', help='(Unused) maintain compat for old automation')
+        ap = argparse.ArgumentParser(
+            description="Deprecated ads* master pipeline wrapper"
+        )
+        ap.add_argument(
+            "--allow-run-legacy",
+            action="store_true",
+            help="(Unused) maintain compat for old automation",
+        )
         args, rest = ap.parse_known_args()
-        print('[DEPRECATION] ads_master_processing_pipeline.py has been replaced by eds_master_processing_pipeline.py')
-        print('Invoke: python scripts/eds_master_processing_pipeline.py <args>')
+        print(
+            "[DEPRECATION] ads_master_processing_pipeline.py has been replaced by eds_master_processing_pipeline.py"
+        )
+        print("Invoke: python scripts/eds_master_processing_pipeline.py <args>")
         if args.allow_run_legacy:
-            print('No legacy implementation retained; exiting.')
+            print("No legacy implementation retained; exiting.")
         return 2
 
-    if __name__ == '__main__':
+    if __name__ == "__main__":
         raise SystemExit(main())
-

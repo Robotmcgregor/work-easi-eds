@@ -21,6 +21,7 @@ from typing import Optional, Tuple, List
 
 ROOT = Path(__file__).resolve().parent.parent
 import sys
+
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -30,6 +31,7 @@ from src.utils.s3_client import S3Client
 def _parse_scene_from_filename(filename: str) -> Optional[str]:
     # Expect patterns like lztmre_p090r084_20150103_db8mz.img -> scene p090r084
     import re
+
     m = re.search(r"_(p\d{3}r\d{3})_", filename.lower())
     return m.group(1) if m else None
 
@@ -37,38 +39,57 @@ def _parse_scene_from_filename(filename: str) -> Optional[str]:
 def _tile_from_scene(scene: str) -> Optional[str]:
     # scene p090r084 -> tile '090_084'
     try:
-        p = int(scene[1:4]); r = int(scene[5:8])
+        p = int(scene[1:4])
+        r = int(scene[5:8])
         return f"{p:03d}_{r:03d}"
     except Exception:
         return None
 
 
-def _find_key_for_filename(s3: S3Client, base_prefix: str, tile_prefix: str, filename: str) -> Optional[str]:
+def _find_key_for_filename(
+    s3: S3Client, base_prefix: str, tile_prefix: str, filename: str
+) -> Optional[str]:
     search_prefix = f"{base_prefix}/{tile_prefix}" if base_prefix else tile_prefix
-    if not search_prefix.endswith('/'):
-        search_prefix += '/'
+    if not search_prefix.endswith("/"):
+        search_prefix += "/"
     # List recursively and find any key that ends with the filename
     for key in s3.list_prefix(search_prefix, recursive=True, max_keys=None):
-        if key.endswith('/' + filename) or key.endswith('\\' + filename):
+        if key.endswith("/" + filename) or key.endswith("\\" + filename):
             return key
     return None
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Fetch inputs listed by --reportinputs from S3")
+    ap = argparse.ArgumentParser(
+        description="Fetch inputs listed by --reportinputs from S3"
+    )
     ap.add_argument("list_file", help="Path to file produced by --reportinputs")
     ap.add_argument("--bucket", required=True, help="S3 bucket name")
     ap.add_argument("--region", help="AWS region")
     ap.add_argument("--profile", help="AWS profile")
     ap.add_argument("--endpoint", help="S3 endpoint URL (optional)")
     ap.add_argument("--role-arn", dest="role_arn", help="Assume role ARN (optional)")
-    ap.add_argument("--base-prefix", default="", help="Base prefix under bucket (e.g., slats/proj)")
-    ap.add_argument("--tile", help="Tile prefix PPP_RRR override if scene parsing fails")
-    ap.add_argument("--dest", default="data/slats_cache", help="Local destination root directory")
-    ap.add_argument("--limit", type=int, help="Optional cap on number of files to fetch")
+    ap.add_argument(
+        "--base-prefix", default="", help="Base prefix under bucket (e.g., slats/proj)"
+    )
+    ap.add_argument(
+        "--tile", help="Tile prefix PPP_RRR override if scene parsing fails"
+    )
+    ap.add_argument(
+        "--dest", default="data/slats_cache", help="Local destination root directory"
+    )
+    ap.add_argument(
+        "--limit", type=int, help="Optional cap on number of files to fetch"
+    )
     args = ap.parse_args(argv)
 
-    s3 = S3Client(bucket=args.bucket, region=args.region or "", profile=args.profile or "", endpoint_url=args.endpoint or "", role_arn=args.role_arn or "")
+    s3 = S3Client(
+        bucket=args.bucket,
+        region=args.region or "",
+        profile=args.profile or "",
+        endpoint_url=args.endpoint or "",
+        role_arn=args.role_arn or "",
+    )
     os.makedirs(args.dest, exist_ok=True)
 
     with open(args.list_file, "r", encoding="utf-8") as f:

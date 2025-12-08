@@ -2,6 +2,7 @@
 Shim for rsc.utils.metadb expected by the QLD script.
 Implements a tiny SQLite metadb and a stdProjFilename mapper into a local compat folder.
 """
+
 from __future__ import annotations
 
 import os
@@ -33,7 +34,8 @@ def connect(api: str = DB_API):
 def _init_db(con: sqlite3.Connection):
     cur = con.cursor()
     # Minimal tables referenced by the script
-    cur.execute("""
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS landsat_list (
             scene TEXT,
             date TEXT,
@@ -41,21 +43,26 @@ def _init_db(con: sqlite3.Connection):
             satellite TEXT,
             instrument TEXT
         )
-    """)
-    cur.execute("""
+    """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS cloudamount (
             scene TEXT,
             date TEXT,
             pcntcloud REAL
         )
-    """)
-    cur.execute("""
+    """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS slats_dates (
             scene TEXT,
             year INTEGER,
             date TEXT
         )
-    """)
+    """
+    )
     con.commit()
 
 
@@ -68,6 +75,7 @@ def stdProjFilename(name: str) -> str:
     if p.is_absolute() and p.exists():
         return str(p)
     from ..utils_common import parse_scene_from_name
+
     scene = parse_scene_from_name(Path(name).name) or "unknown_scene"
     dest = FILES_DIR / scene / Path(name).name
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -79,16 +87,28 @@ class _ProxyCursor:
 
     Specifically, qualify ambiguous ORDER BY clauses that refer to 'date' to 'landsat_list.date'.
     """
+
     def __init__(self, cursor: sqlite3.Cursor):
         self._c = cursor
 
     def _rewrite_sql(self, sql: str) -> str:
         try:
             import re
+
             # Qualify ORDER BY date to avoid ambiguity
-            sql = re.sub(r"order\s+by\s+date\b", "order by landsat_list.date", sql, flags=re.IGNORECASE)
+            sql = re.sub(
+                r"order\s+by\s+date\b",
+                "order by landsat_list.date",
+                sql,
+                flags=re.IGNORECASE,
+            )
             # Remove satellite filter (allow our synthetic 'lz' entries) by replacing it with a tautology
-            sql = re.sub(r"landsat_list\.satellite\s+in\s*\('l8'\s*,\s*'l9'\)", "1=1", sql, flags=re.IGNORECASE)
+            sql = re.sub(
+                r"landsat_list\.satellite\s+in\s*\('l8'\s*,\s*'l9'\)",
+                "1=1",
+                sql,
+                flags=re.IGNORECASE,
+            )
             # Normalize SUBSTRING to SQLite substr
             sql = re.sub(r"substring\s*\(", "substr(", sql, flags=re.IGNORECASE)
         except Exception:
