@@ -1,0 +1,326 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}EDS Admin Dashboard{% endblock %}</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="wrapper">
+        <!-- Navbar -->
+        <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top">
+            <div class="container-fluid">
+                <!-- Brand/Logo -->
+                <a class="navbar-brand d-flex align-items-center" href="/">
+                    <i class="bi bi-globe-americas me-2"></i>
+                    <span class="fw-bold">EDS</span>
+                    <span class="ms-1 small" style="opacity: 0.9;">Admin</span>
+                </a>
+                
+                <!-- Toggle Button for Mobile -->
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" 
+                        aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                
+                <!-- Navbar Items -->
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav ms-auto">
+                        <li class="nav-item">
+                            <a class="nav-link" href="/">Dashboard</a>
+                        </li>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" 
+                               data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="bi bi-person-circle"></i> 
+                                {{ user.username|default:"Admin" }}
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
+                                <li><a class="dropdown-item" href="/admin/auth/user/">
+                                    <i class="bi bi-person-fill"></i> Profile
+                                </a></li>
+                                <li><a class="dropdown-item" href="/admin/password_change/">
+                                    <i class="bi bi-lock-fill"></i> Change Password
+                                </a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="/admin/logout/">
+                                    <i class="bi bi-box-arrow-right"></i> Logout
+                                </a></li>
+                            </ul>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Container with Sidebar -->
+        <div class="container-fluid main-container">
+            <div class="row g-0 h-100">
+                <!-- Sidebar -->
+                <div class="col-auto sidebar bg-light border-end">
+                    <div class="sidebar-content">
+                        <!-- Sidebar Header -->
+                        <div class="sidebar-header p-3 border-bottom">
+                            <h6 class="mb-0 text-muted small text-uppercase fw-bold">
+                                <i class="bi bi-diagram-3"></i> Navigation
+                            </h6>
+                        </div>
+
+                        <!-- Sidebar Menu -->
+                        <ul class="nav flex-column nav-pills sidebar-nav p-3">
+                            <!-- Dashboard -->
+                            <li class="nav-item mb-1">
+                                <a class="nav-link" href="/" data-section="dashboard">
+                                    <i class="bi bi-speedometer2"></i>
+                                    <span>Dashboard</span>
+                                </a>
+                            </li>
+
+                            <!-- Data Management Section -->
+                            <li class="nav-item">
+                                <a class="nav-link collapsed" href="#dataCollapse" data-bs-toggle="collapse" 
+                                   aria-expanded="false" aria-controls="dataCollapse">
+                                    <i class="bi bi-database"></i>
+                                    <span>Data Management</span>
+                                    <i class="bi bi-chevron-down ms-auto"></i>
+                                </a>
+                                <div class="collapse" id="dataCollapse">
+                                    <ul class="nav flex-column ms-3 mt-2">
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/tiles/map/" data-section="tiles">
+                                                <i class="bi bi-map"></i> Tile Map
+                                                <span class="badge bg-info ms-auto">466</span>
+                                            </a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/tiles/all/" data-section="tiles-all">
+                                                <i class="bi bi-grid-3x3-gap"></i> All Tiles
+                                            </a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/data/collection/" data-section="collection">
+                                                <i class="bi bi-cloud-download"></i> LS8/9 SR+FC Collection
+                                            </a>
+                                        </li>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </li>
+
+                            <!-- Processing Section -->
+                            <li class="nav-item">
+                                <a class="nav-link collapsed" href="#processingCollapse" data-bs-toggle="collapse" 
+                                   aria-expanded="false" aria-controls="processingCollapse">
+                                    <i class="bi bi-gear"></i>
+                                    <span>Processing</span>
+                                    <i class="bi bi-chevron-down ms-auto"></i>
+                                </a>
+                                <div class="collapse" id="processingCollapse">
+                                    <ul class="nav flex-column ms-3 mt-2">
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/runs/" data-section="runs">
+                                                <i class="bi bi-play-circle"></i> EDS Runs
+                                                <span class="badge bg-success ms-auto">3</span>
+                                            </a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/admin/runs/edsresult/" data-section="results">
+                                                <i class="bi bi-check-circle"></i> Results
+                                                <span class="badge bg-success ms-auto">483</span>
+                                            </a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/processing/" data-section="processing-ad-hoc">
+                                                <i class="bi bi-gear-wide-connected"></i> Ad-hoc Processing
+                                            </a>
+                                        </li>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </li>
+
+                            <!-- Detection Section -->
+                            <li class="nav-item">
+                                <a class="nav-link collapsed" href="#detectionCollapse" data-bs-toggle="collapse" 
+                                   aria-expanded="false" aria-controls="detectionCollapse">
+                                    <i class="bi bi-map"></i>
+                                    <span>Detection</span>
+                                    <i class="bi bi-chevron-down ms-auto"></i>
+                                </a>
+                                <div class="collapse" id="detectionCollapse">
+                                    <ul class="nav flex-column ms-3 mt-2">
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/admin/detection/edsdetection/" data-section="detections">
+                                                <i class="bi bi-bullseye"></i> Detections
+                                                <span class="badge bg-warning ms-auto">14.7K</span>
+                                            </a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/admin/detection/detectionalert/" data-section="alerts">
+                                                <i class="bi bi-bell"></i> Alerts
+                                                <span class="badge bg-secondary ms-auto">0</span>
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </li>
+
+                            <!-- Validation Section -->
+                            <li class="nav-item">
+                                <a class="nav-link collapsed" href="#validationCollapse" data-bs-toggle="collapse" 
+                                   aria-expanded="false" aria-controls="validationCollapse">
+                                    <i class="bi bi-check-square"></i>
+                                    <span>Validation</span>
+                                    <i class="bi bi-chevron-down ms-auto"></i>
+                                </a>
+                                <div class="collapse" id="validationCollapse">
+                                    <ul class="nav flex-column ms-3 mt-2">
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/qc/validations/" data-section="qc-validations">
+                                                <i class="bi bi-clipboard-check"></i> QC Validations
+                                            </a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/admin/validation/qcvalidation/" data-section="qc-admin">
+                                                <i class="bi bi-gear"></i> QC Admin
+                                            </a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/admin/validation/qcauditlog/" data-section="audit">
+                                                <i class="bi bi-file-text"></i> Audit Log
+                                                <span class="badge bg-secondary ms-auto">0</span>
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </li>
+
+                            <!-- User Management Section -->
+                            <li class="nav-item">
+                                <a class="nav-link collapsed" href="#usersCollapse" data-bs-toggle="collapse" 
+                                   aria-expanded="false" aria-controls="usersCollapse">
+                                    <i class="bi bi-people"></i>
+                                    <span>User Management</span>
+                                    <i class="bi bi-chevron-down ms-auto"></i>
+                                </a>
+                                <div class="collapse" id="usersCollapse">
+                                    <ul class="nav flex-column ms-3 mt-2">
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/admin/auth/user/" data-section="users">
+                                                <i class="bi bi-person-fill"></i> Users
+                                            </a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/admin/auth/group/" data-section="groups">
+                                                <i class="bi bi-people-fill"></i> Groups
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </li>
+
+                            <!-- System Section -->
+                            <li class="nav-item mt-3 pt-3 border-top">
+                                <a class="nav-link collapsed" href="#systemCollapse" data-bs-toggle="collapse" 
+                                   aria-expanded="false" aria-controls="systemCollapse">
+                                    <i class="bi bi-gear-fill"></i>
+                                    <span>System</span>
+                                    <i class="bi bi-chevron-down ms-auto"></i>
+                                </a>
+                                <div class="collapse" id="systemCollapse">
+                                    <ul class="nav flex-column ms-3 mt-2">
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/admin/sites/site/" data-section="sites">
+                                                <i class="bi bi-globe"></i> Sites
+                                            </a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" href="/admin/admin/logentry/" data-section="logs">
+                                                <i class="bi bi-clock-history"></i> Admin Log
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </li>
+                        </ul>
+
+                        <!-- Sidebar Footer -->
+                        <div class="sidebar-footer p-3 border-top mt-auto">
+                            <small class="text-muted d-block">
+                                <i class="bi bi-info-circle"></i> v1.0 EDS Admin
+                            </small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Content -->
+                <div class="col main-content">
+                    <!-- Page Header (if needed) -->
+                    {% block page_header %}{% endblock %}
+
+                    <!-- Breadcrumb -->
+                    {% block breadcrumb %}
+                    <nav aria-label="breadcrumb" class="bg-light p-3 border-bottom">
+                        <ol class="breadcrumb mb-0">
+                            <li class="breadcrumb-item"><a href="/">Dashboard</a></li>
+                            {% block breadcrumb_items %}{% endblock %}
+                        </ol>
+                    </nav>
+                    {% endblock %}
+
+                    <!-- Main Content Area -->
+                    <div class="main-body p-4">
+                        <!-- Alerts -->
+                        {% if messages %}
+                        <div class="alert-container">
+                            {% for message in messages %}
+                            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Content Block -->
+                        {% block content %}
+                        <div class="alert alert-info">
+                            <h5>Welcome to EDS Admin Dashboard</h5>
+                            <p>Navigate through the sidebar to manage your data.</p>
+                        </div>
+                        {% endblock %}
+                    </div>
+
+                    <!-- Footer -->
+                    <footer class="bg-light border-top p-3 mt-5 text-center">
+                        <small class="text-muted">
+                            EDS Admin Dashboard • Django {{ django_version }} • 
+                            <a href="#" class="text-decoration-none">Documentation</a>
+                        </small>
+                    </footer>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom JS -->
+    <script src="{% static 'js/script.js' %}"></script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

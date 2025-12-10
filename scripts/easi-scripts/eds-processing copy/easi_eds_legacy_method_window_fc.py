@@ -1307,15 +1307,13 @@ def main(argv=None) -> int:
     # ---------------------------------------------
     # era string encodes the start and end dates.
     era = f"d{sd}{ed}"
-    
+
     # Put outputs in the same folder as the start db8 (i.e. the compat
-    # scene folder). Include the tile (scene) and the process used (fpc)
-    # in the output naming for consistency with SR variants.
+    # scene folder).
     base_dir = Path(start_db8).parent
 
-    out_base = f"lztmre_{scene}_{era}_vi-fpc"
-    out_cls = stdProjFilename(str(base_dir / f"{out_base}_dllmz.img"))
-    out_int = stdProjFilename(str(base_dir / f"{out_base}_dljmz.img"))
+    out_cls = stdProjFilename(str(base_dir / f"lztmre_{scene}_{era}_dllmz.img"))
+    out_int = stdProjFilename(str(base_dir / f"lztmre_{scene}_{era}_dljmz.img"))
 
     # Make sure the folder exists.
     Path(out_cls).parent.mkdir(parents=True, exist_ok=True)
@@ -1332,34 +1330,6 @@ def main(argv=None) -> int:
         dtype=gdal.GDT_Byte,
         nodata=0,
     )
-
-    # Lightweight JSON provenance log for consistency with SR variants
-    try:
-        import json
-        log = {
-            "scene": scene,
-            "start_date": sd,
-            "end_date": ed,
-            "process": "vi-fpc",
-            "window_start": ws,
-            "window_end": we,
-            "lookback_years": args.lookback,
-            "baseline_dates": base_dates,
-            "selected_start_date": dates[idx_start],
-            "selected_end_date": dates[idx_end],
-            "omit_fpc_start_threshold": bool(args.omit_fpc_start_threshold),
-            "outputs": {
-                "dll": out_cls,
-                "dlj": out_int
-            }
-        }
-        log_path = os.path.splitext(out_cls)[0] + "_log.json"
-        with open(log_path, "w", encoding="utf-8") as f:
-            json.dump(log, f, indent=2)
-        if args.verbose:
-            print(f"Wrote: {log_path}")
-    except Exception as e:
-        print(f"[WARN] Failed to write log JSON: {e}")
 
     # ---------------------------------------------
     # 13. Friendly console output

@@ -1,0 +1,439 @@
+{% extends "base.html" %}
+
+{% block title %}Landsat Tile Map - EDS{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    /* Full height content container for map */
+    .main-content {
+        padding: 0 !important;
+    }
+    
+    .main-body {
+        padding: 0 !important;
+    }
+    
+    .map-wrapper {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+    }
+    
+    .map-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px 30px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        flex-shrink: 0;
+        border-bottom: none;
+    }
+    
+    .map-header h2 {
+        margin: 0 0 5px 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 1.8rem;
+    }
+    
+    .map-header p {
+        margin: 0;
+        opacity: 0.95;
+        font-size: 0.95rem;
+    }
+    
+    .map-controls {
+        padding: 15px 30px;
+        background: white;
+        border-bottom: 1px solid #e0e0e0;
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+    }
+    
+    .stat-badge {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+    
+    .stat-badge.active {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+    
+    #map {
+        flex: 1;
+        width: 100%;
+        overflow: hidden;
+    }
+    
+    .tile-tooltip {
+        background: rgba(0, 0, 0, 0.8) !important;
+        color: white !important;
+        padding: 8px 12px !important;
+        border-radius: 6px !important;
+        font-size: 0.85rem !important;
+        font-weight: 600 !important;
+        white-space: nowrap !important;
+        pointer-events: none !important;
+    }
+    
+    .leaflet-popup-content-wrapper {
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    
+    .leaflet-popup-content {
+        margin: 0;
+        width: 280px;
+        font-size: 0.9rem;
+    }
+    
+    .popup-tile-info {
+        padding: 15px;
+    }
+    
+    .popup-tile-info h5 {
+        margin: 0 0 12px 0;
+        font-size: 1.1rem;
+        color: #333;
+        font-weight: 700;
+    }
+    
+    .popup-tile-info .info-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid #f0f0f0;
+        font-size: 0.9rem;
+    }
+    
+    .popup-tile-info .info-row:last-child {
+        border-bottom: none;
+    }
+    
+    .popup-tile-info .label {
+        font-weight: 600;
+        color: #666;
+    }
+    
+    .popup-tile-info .value {
+        color: #333;
+    }
+    
+    .popup-tile-info .status-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        margin-top: 10px;
+    }
+    
+    .status-active {
+        background: #d4edda;
+        color: #155724;
+    }
+    
+    .status-inactive {
+        background: #f8d7da;
+        color: #721c24;
+    }
+    
+    .controls-group {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+    }
+    
+    .controls-group label {
+        margin: 0;
+        font-weight: 600;
+        color: #333;
+    }
+    
+    .controls-group select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        min-width: 180px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="map-wrapper">
+<!-- Header -->
+<div class="map-header">
+    <h2><i class="bi bi-map"></i> Landsat Tile Grid - Australia</h2>
+    <p>Interactive map showing Landsat tile coverage across Australia - Hover over tiles to see path/row, click for details</p>
+</div>
+
+<!-- Controls -->
+<div class="map-controls">
+    <div class="controls-group">
+        <label for="filterStatus">Filter by Status:</label>
+        <select id="filterStatus" class="form-select">
+            <option value="">All Tiles</option>
+            <option value="active">Active Only</option>
+            <option value="pending">Pending</option>
+            <option value="processing">Processing</option>
+            <option value="completed">Completed</option>
+        </select>
+    </div>
+    <div class="controls-group">
+        <label for="shpPath">Import tiles from shapefile:</label>
+        <input id="shpPath" type="text" class="form-control" style="min-width:300px" placeholder="C:\\Users\\DCCEEW\\code\\work-easi-eds\\assets\\AUS_Sentinel2_Tiles_Geom.shp" />
+        <button id="importTilesBtn" class="btn btn-sm btn-outline-primary">Import</button>
+    </div>
+    
+    <div style="margin-left: auto; display: flex; gap: 15px;">
+        <div class="stat-badge">
+            <i class="bi bi-grid-3x3-gap"></i> Total: {{ tiles_count }}
+        </div>
+        <div class="stat-badge active">
+            <i class="bi bi-check-circle"></i> Active: {{ active_tiles }}
+        </div>
+    </div>
+</div>
+
+<!-- Map -->
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Initialize map
+        const map = L.map('map').setView([-25.2744, 133.7751], 4);
+        
+        // Add tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 10
+        }).addTo(map);
+        
+        // Parse GeoJSON data
+        const geojsonData = {{ geojson_data|safe }};
+        
+        // Store all features for filtering
+        let allFeatures = {};
+        let markerGroup = L.featureGroup();
+        let highlightedLayer = null;
+        
+        // Get tile ID from URL query params
+        const urlParams = new URLSearchParams(window.location.search);
+        const highlightTile = urlParams.get('tile');
+        
+        // Create a color function based on tile status
+        function getColor(status, isActive) {
+            if (!isActive) return '#cccccc';
+            switch(status) {
+                case 'pending': return '#ffc107';
+                case 'processing': return '#0dcaf0';
+                case 'completed': return '#198754';
+                default: return '#0d6efd';
+            }
+        }
+        
+        // Create detailed popup
+        function createPopup(props) {
+            const statusBadge = props.is_active 
+                ? `<span class="status-badge status-active">${props.status}</span>`
+                : `<span class="status-badge status-inactive">Inactive</span>`;
+            
+            const popupContent = `
+                <div class="popup-tile-info">
+                    <h5>${props.tile_id}</h5>
+                    <div class="info-row">
+                        <span class="label">Path:</span>
+                        <span class="value">${props.path}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Row:</span>
+                        <span class="value">${props.row}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Status:</span>
+                        <span class="value">${statusBadge}</span>
+                    </div>
+                </div>
+            `;
+            
+            return popupContent;
+        }
+        
+        // Add GeoJSON features to map
+        if (geojsonData.features && geojsonData.features.length > 0) {
+            geojsonData.features.forEach(feature => {
+                const props = feature.properties;
+                const color = getColor(props.status, props.is_active);
+                
+                const style = {
+                    color: color,
+                    weight: 2,
+                    opacity: 0.8,
+                    fillOpacity: 0.3
+                };
+                
+                const geoJsonLayer = L.geoJSON(feature, {
+                    style: style,
+                    onEachFeature: function(feature, layer) {
+                        const props = feature.properties;
+                        
+                        // Create popup
+                        const popupContent = createPopup(props);
+                        layer.bindPopup(popupContent, {
+                            maxWidth: 300,
+                            minWidth: 280
+                        });
+                        
+                        // Create hover tooltip showing Path/Row
+                        layer.bindTooltip(`P${props.path}R${props.row}`, {
+                            permanent: false,
+                            direction: 'center',
+                            className: 'tile-tooltip'
+                        });
+                        
+                        // Hover effects
+                        layer.on('mouseover', function() {
+                            if (highlightedLayer !== this) {
+                                this.setStyle({
+                                    weight: 3,
+                                    opacity: 1,
+                                    fillOpacity: 0.5
+                                });
+                            }
+                        });
+                        
+                        layer.on('mouseout', function() {
+                            if (highlightedLayer !== this) {
+                                this.setStyle(style);
+                            }
+                        });
+                        
+                        // Store reference
+                        allFeatures[props.tile_id] = {layer, feature};
+                    }
+                }).addTo(map);
+                
+                markerGroup.addLayer(geoJsonLayer);
+            });
+        }
+        
+        // Filter functionality
+        document.getElementById('filterStatus').addEventListener('change', function(e) {
+            const filter = e.target.value;
+            
+            // Remove current layers and re-add with filter
+            markerGroup.clearLayers();
+            
+            geojsonData.features.forEach(feature => {
+                const props = feature.properties;
+                let show = true;
+                
+                if (filter === 'active' && !props.is_active) show = false;
+                else if (filter === 'pending' && props.status !== 'pending') show = false;
+                else if (filter === 'processing' && props.status !== 'processing') show = false;
+                else if (filter === 'completed' && props.status !== 'completed') show = false;
+                
+                if (show) {
+                    const color = getColor(props.status, props.is_active);
+                    const style = {
+                        color: color,
+                        weight: 2,
+                        opacity: 0.8,
+                        fillOpacity: 0.3
+                    };
+                    
+                    const geoJsonLayer = L.geoJSON(feature, {
+                        style: style,
+                        onEachFeature: function(feature, layer) {
+                            const props = feature.properties;
+                            const popupContent = createPopup(props);
+                            layer.bindPopup(popupContent, {
+                                maxWidth: 300,
+                                minWidth: 280
+                            });
+                            
+                            layer.bindTooltip(`P${props.path}R${props.row}`, {
+                                permanent: false,
+                                direction: 'center',
+                                className: 'tile-tooltip'
+                            });
+                            
+                            layer.on('mouseover', function() {
+                                this.setStyle({
+                                    weight: 3,
+                                    opacity: 1,
+                                    fillOpacity: 0.5
+                                });
+                            });
+                            
+                            layer.on('mouseout', function() {
+                                this.setStyle(style);
+                            });
+                        }
+                    });
+                    
+                    markerGroup.addLayer(geoJsonLayer);
+                }
+            });
+            
+            markerGroup.addTo(map);
+        });
+        
+        // Auto-fit map bounds to all features
+        if (markerGroup.getLayers().length > 0) {
+            map.fitBounds(markerGroup.getBounds().pad(0.1));
+        }
+        
+        // Highlight specific tile if requested via URL param
+        if (highlightTile && allFeatures[highlightTile]) {
+            const {layer, feature} = allFeatures[highlightTile];
+            
+            // Set highlight style (bright orange/yellow with thicker border)
+            const highlightStyle = {
+                color: '#ff6600',
+                weight: 5,
+                opacity: 1,
+                fillColor: '#ffcc00',
+                fillOpacity: 0.6
+            };
+            layer.setStyle(highlightStyle);
+            highlightedLayer = layer;
+            
+            // Zoom to the highlighted tile
+            map.fitBounds(layer.getBounds(), {padding: [50, 50]});
+            
+            // Open popup automatically
+            layer.openPopup();
+        }
+
+        // Import tiles from shapefile -> calls API to populate DB
+        document.getElementById('importTilesBtn').addEventListener('click', async () => {
+            const shp = document.getElementById('shpPath').value.trim();
+            if (!shp) { alert('Enter a shapefile path'); return; }
+            const res = await fetch('/api/data/tiles/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shp_path: shp })
+            });
+            const data = await res.json();
+            if (data.error) {
+                alert('Import failed: ' + data.error);
+            } else {
+                alert(`Import complete. Created: ${data.created}, Updated: ${data.updated}. Reload the page to refresh the map.`);
+            }
+        });
+    </script>
+</div>
+{% endblock %}
