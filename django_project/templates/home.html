@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}EDS Admin Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-5">
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <h1 class="display-4 mb-2">Welcome to EDS Admin Dashboard</h1>
+            <p class="lead text-muted">Ecological Disturbance Surveillance - Data Management & Analytics</p>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row g-3 mb-5">
+        <!-- Tiles Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <p class="card-text text-muted small mb-1">Landsat Tiles</p>
+                            <h3 class="card-title m-0">{{ stats.tiles|default:"0" }}</h3>
+                        </div>
+                        <div class="text-primary" style="font-size: 2rem;">
+                            <i class="bi bi-grid-3x3-gap"></i>
+                        </div>
+                    </div>
+                    <a href="/tiles/map/" class="btn btn-sm btn-outline-primary mt-3">View Map</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Runs Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <p class="card-text text-muted small mb-1">EDS Runs</p>
+                            <h3 class="card-title m-0">{{ stats.runs|default:"0" }}</h3>
+                        </div>
+                        <div class="text-success" style="font-size: 2rem;">
+                            <i class="bi bi-play-circle"></i>
+                        </div>
+                    </div>
+                    <a href="/runs/" class="btn btn-sm btn-outline-success mt-3">View Runs</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <p class="card-text text-muted small mb-1">Processing Results</p>
+                            <h3 class="card-title m-0">{{ stats.results|default:"0" }}</h3>
+                        </div>
+                        <div class="text-info" style="font-size: 2rem;">
+                            <i class="bi bi-bar-chart"></i>
+                        </div>
+                    </div>
+                    <a href="/admin/runs/result/" class="btn btn-sm btn-outline-info mt-3">View Results</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detections Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <p class="card-text text-muted small mb-1">Detections</p>
+                            <h3 class="card-title m-0">{{ stats.detections|default:"0" }}</h3>
+                        </div>
+                        <div class="text-warning" style="font-size: 2rem;">
+                            <i class="bi bi-exclamation-circle"></i>
+                        </div>
+                    </div>
+                    <a href="/admin/detection/detection/" class="btn btn-sm btn-outline-warning mt-3">View Detections</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Validations Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <p class="card-text text-muted small mb-1">QC Validations</p>
+                            <h3 class="card-title m-0">{{ stats.validations|default:"0" }}</h3>
+                        </div>
+                        <div class="text-success" style="font-size: 2rem;">
+                            <i class="bi bi-check-circle"></i>
+                        </div>
+                    </div>
+                    <a href="/admin/validation/qcvalidation/" class="btn btn-sm btn-outline-success mt-3">View Validations</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Users Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <p class="card-text text-muted small mb-1">Users</p>
+                            <h3 class="card-title m-0">{{ stats.users|default:"0" }}</h3>
+                        </div>
+                        <div class="text-secondary" style="font-size: 2rem;">
+                            <i class="bi bi-people"></i>
+                        </div>
+                    </div>
+                    <a href="/admin/accounts/user/" class="btn btn-sm btn-outline-secondary mt-3">View Users</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Access Section -->
+    <div class="row mb-5">
+        <div class="col-md-12">
+            <h4 class="mb-3">Quick Access</h4>
+            <div class="btn-group" role="group">
+                <a href="/tiles/map/" class="btn btn-outline-primary">
+                    <i class="bi bi-map"></i> Tile Map
+                </a>
+                <a href="/runs/" class="btn btn-outline-primary">
+                    <i class="bi bi-play-circle"></i> Runs
+                </a>
+                <a href="/processing/" class="btn btn-outline-primary">
+                    <i class="bi bi-gear-wide-connected"></i> Processing
+                </a>
+                <a href="/admin/detection/detection/" class="btn btn-outline-primary">
+                    <i class="bi bi-exclamation-circle"></i> Detections
+                </a>
+                <a href="/admin/validation/qcvalidation/" class="btn btn-outline-primary">
+                    <i class="bi bi-check-circle"></i> Validations
+                </a>
+                <a href="/admin/" class="btn btn-outline-primary">
+                    <i class="bi bi-gear"></i> Admin
+                </a>
+                <a href="/data/collection/" class="btn btn-outline-primary">
+                    <i class="bi bi-cloud-download"></i> Data Collection
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Info -->
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card border-0 shadow-sm bg-light">
+                <div class="card-body">
+                    <h5 class="card-title">System Information</h5>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>Current User:</strong> {{ user.username }}</p>
+                            <p><strong>User Email:</strong> {{ user.email }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>Last Login:</strong> {{ user.last_login|date:"Y-m-d H:i" }}</p>
+                            <p><strong>Status:</strong> <span class="badge bg-success">Active</span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.hover-lift {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.hover-lift:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+}
+
+.btn-group .btn {
+    margin: 5px;
+}
+</style>
+{% endblock %}

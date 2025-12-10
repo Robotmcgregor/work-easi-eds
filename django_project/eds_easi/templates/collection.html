@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Data Collection (LS8/9 SR+FC){% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <h2>LS8/9 SR+FC Collection Pipeline</h2>
+  <p>Run the tile-driven query (and optional season filter + download) for Landsat 8/9 Surface Reflectance and Fractional Cover.</p>
+
+  <form id="collection-form" class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label">Tile shapefile</label>
+      <input type="text" class="form-control" name="tile_shp" placeholder="C:\\Users\\...\\assets\\eds_lsat_grid_min_max.shp" />
+      <div class="form-text">Default resolves to ~/scratch/eds/assets/eds_lsat_grid_min_max.shp if left empty.</div>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Span years</label>
+      <input type="number" class="form-control" name="span_years" value="10" />
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Tile ID (optional)</label>
+      <input type="text" class="form-control" name="tile_id" placeholder="p104r070" />
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Path (optional)</label>
+      <input type="number" class="form-control" name="path" />
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Row (optional)</label>
+      <input type="number" class="form-control" name="row" />
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label">Core season start (YYYYMM)</label>
+      <input type="text" class="form-control" name="season_core_start" placeholder="202407" />
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Core season end (YYYYMM)</label>
+      <input type="text" class="form-control" name="season_core_end" placeholder="202410" />
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label">Enable download from comparison</label>
+      <select class="form-select" name="run_download">
+        <option value="false" selected>No</option>
+        <option value="true">Yes</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Download start date (YYYY-MM-DD)</label>
+      <input type="text" class="form-control" name="download_start_date" />
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Download end date (YYYY-MM-DD)</label>
+      <input type="text" class="form-control" name="download_end_date" />
+    </div>
+
+    <div class="col-12">
+      <button type="button" id="run-collection-btn" class="btn btn-primary">Run Collection Pipeline</button>
+    </div>
+  </form>
+
+  <hr />
+  <div id="collection-status" class="mt-2">
+    <h5>Status</h5>
+    <pre id="collection-log" class="bg-light p-2 border" style="max-height: 300px; overflow:auto"></pre>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+// This example posts to the existing collection_run API to record the job.
+// If you want to directly invoke ls89_fc_sr_pipeline.py here, wire a new API endpoint
+// that shells out to the script and returns a job id + log tail similar to processing.
+
+document.getElementById('run-collection-btn').addEventListener('click', async () => {
+  const form = document.getElementById('collection-form');
+  const payload = Object.fromEntries(new FormData(form).entries());
+
+  // For now, minimally record a collection run using required fields
+  // You can extend the API to accept the pipeline parameters.
+  const minimal = {
+    tile: payload.tile_id || '',
+    start_date: (new Date()).toISOString().slice(0,10).replace(/-/g,''),
+    end_date: (new Date()).toISOString().slice(0,10).replace(/-/g,''),
+  };
+
+  const res = await fetch('/api/collection/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(minimal)
+  });
+  const data = await res.json();
+  const log = document.getElementById('collection-log');
+  if (data.id) {
+    log.textContent = 'Collection job ' + data.id + ' queued.\n';
+  } else {
+    log.textContent = JSON.stringify(data, null, 2);
+  }
+});
+</script>
+{% endblock %}

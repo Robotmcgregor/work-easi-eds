@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}QC Review{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+#review-map { height: 500px; width: 100%; border-radius: 8px; margin-bottom: 1rem; }
+.detection-card { background: #fff; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 1rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+  <h2 class="mb-3"><i class="bi bi-clipboard-check"></i> QC Review: Validate Detections</h2>
+  <p class="text-muted">Review unvalidated land-clearing detections (IsClearing='y'). Select a detection, inspect on the map, and submit your QC decision.</p>
+
+  <div class="row">
+    <div class="col-md-8">
+      <div class="detection-card">
+        <h5>Detection Map</h5>
+        <div id="review-map"></div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="detection-card">
+        <h5>QC Form</h5>
+        <form id="qc-form">
+          <div class="mb-3">
+            <label class="form-label">Select Detection <span class="badge bg-info">{{ total_detections }} unreviewed</span></label>
+            <select id="detection-select" class="form-select" required>
+              <option value="">-- Choose --</option>
+              {% for d in unreviewed_detections %}
+              <option value="{{ d.id }}" data-geojson="{{ d.geom_geojson|safe }}" data-tile="{{ d.tile.tile_id|default:'' }}">
+                Det #{{ d.id }} - {{ d.tile.tile_id|default:"Unknown" }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Reviewer</label>
+            <input type="text" id="reviewer" class="form-control" required placeholder="Your name" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Decision</label>
+            <select id="decision" class="form-select" required>
+              <option value="">-- Choose --</option>
+              <option value="confirmed">Confirm Clearing</option>
+              <option value="rejected">Reject (Not Clearing)</option>
+              <option value="requires_review">Requires Further Review</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Confidence (1-5)</label>
+            <input type="number" id="confidence" class="form-control" min="1" max="5" value="3" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Comments</label>
+            <textarea id="comments" class="form-control" rows="3" placeholder="Optional notes"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary w-100"><i class="bi bi-check-circle"></i> Submit QC</button>
+        </form>
+        <div id="submit-status" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-md-12">
+      <div class="detection-card">
+        <h5>Detection Details</h5>
+        <div id="detection-details" class="text-muted">Select a detection to view details</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// Initialize map
+const map = L.map('review-map').setView([-25.2744, 133.7751], 4);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors',
+  maxZoom: 18
+}).addTo(map);
+
+let currentLayer = null;
+
+// Detection select handler
+document.getElementById('detection-select').addEventListener('change', (e) => {
+  const opt = e.target.selectedOptions[0];
+  if (!opt || !opt.value) return;
+  const geojsonRaw = opt.getAttribute('data-geojson');
+  const tile = opt.getAttribute('data-tile');
+  const detId = opt.value;
+
+  // Clear previous layer
+  if (currentLayer) {
+    map.removeLayer(currentLayer);
+  }
+
+  // Parse GeoJSON
+  let geojson;
+  try {
+    geojson = typeof geojsonRaw === 'string' ? JSON.parse(geojsonRaw) : geojsonRaw;
+  } catch {
+    document.getElementById('detection-details').innerHTML = `<p class="text-danger">Invalid GeoJSON for detection ${detId}</p>`;
+    return;
+  }
+
+  // Display on map
+  currentLayer = L.geoJSON(geojson, {
+    style: { color: '#ff6600', weight: 3, fillColor: '#ffcc00', fillOpacity: 0.4 }
+  }).addTo(map);
+
+  // Zoom to detection
+  map.fitBounds(currentLayer.getBounds(), { padding: [50, 50] });
+
+  // Update details panel
+  document.getElementById('detection-details').innerHTML = `
+    <p><strong>Detection ID:</strong> ${detId}</p>
+    <p><strong>Tile:</strong> ${tile || 'Unknown'}</p>
+    <p><strong>Geometry Type:</strong> ${geojson.type || 'Unknown'}</p>
+  `;
+});
+
+// QC form submission
+document.getElementById('qc-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const detId = document.getElementById('detection-select').value;
+  const reviewer = document.getElementById('reviewer').value.trim();
+  const decision = document.getElementById('decision').value;
+  const confidence = document.getElementById('confidence').value;
+  const comments = document.getElementById('comments').value.trim();
+
+  if (!detId || !reviewer || !decision) {
+    document.getElementById('submit-status').innerHTML = `<div class="alert alert-warning">Please fill all required fields</div>`;
+    return;
+  }
+
+  const res = await fetch('/api/qc/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ detection_id: detId, reviewer, decision, confidence, comments })
+  });
+  const data = await res.json();
+  if (data.error) {
+    document.getElementById('submit-status').innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+  } else {
+    document.getElementById('submit-status').innerHTML = `<div class="alert alert-success">QC submitted! (ID: ${data.id})</div>`;
+    // Remove from dropdown and reset
+    document.querySelector(`option[value="${detId}"]`).remove();
+    document.getElementById('qc-form').reset();
+    if (currentLayer) {
+      map.removeLayer(currentLayer);
+      currentLayer = null;
+    }
+    document.getElementById('detection-details').innerHTML = `<p class="text-muted">Select next detection</p>`;
+    // Update badge count
+    const badge = document.querySelector('.badge.bg-info');
+    const count = parseInt(badge.textContent.match(/\d+/)[0]) - 1;
+    badge.textContent = `${count} unreviewed`;
+  }
+});
+</script>
+{% endblock %}
