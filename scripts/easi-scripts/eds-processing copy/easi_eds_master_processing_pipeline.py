@@ -1120,11 +1120,6 @@ def main():
         help="Restrict SR composites to *_nbart6m*_clr.tif or *_srb?_clr.tif where available",
     )
     ap.add_argument(
-        "--collect-logs",
-        action="store_true",
-        help="After processing, scan out-root for *_dllmz_log.json and write consolidated summaries",
-    )
-    ap.add_argument(
         "--fc-prefer-clr",
         action="store_true",
         help="Forward prefer-clr behaviour (otherwise default prefer)",
@@ -1872,24 +1867,6 @@ def main():
 
     print("\n=== EDS MASTER PIPELINE COMPLETE ===")
     print(json.dumps(results, indent=2))
-
-    # Optional: collect per-run JSON logs into summary JSON/CSV under out-root/reports
-    if args.collect_logs:
-        try:
-            pyexe = args.python_exe or sys.executable
-            reports_dir = Path(args.out_root) / "reports"
-            collector = Path(__file__).resolve().parent / "easi_collect_run_logs.py"
-            cmd_collect = [
-                pyexe,
-                str(collector),
-                "--root",
-                str(Path(args.out_root)),
-                "--out",
-                str(reports_dir),
-            ]
-            run_cmd(cmd_collect, args.dry_run, "collect_run_logs", results)
-        except Exception as e:
-            print(f"[WARN] Log collection failed: {e}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,504 @@
+/* ============================================
+   EDS Admin Dashboard - Custom Styling
+   ============================================ */
+
+:root {
+    --primary-color: #0d6efd;
+    --sidebar-width: 280px;
+    --navbar-height: 56px;
+    --transition: all 0.3s ease;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+}
+
+body {
+    background-color: #f8f9fa;
+}
+
+/* ============================================
+   Wrapper & Layout
+   ============================================ */
+
+.wrapper {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+/* Navbar */
+.navbar {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    z-index: 1030;
+}
+
+.navbar-brand {
+    font-size: 1.3rem;
+    letter-spacing: 0.5px;
+    transition: var(--transition);
+}
+
+.navbar-brand:hover {
+    opacity: 0.9;
+}
+
+/* Main Container */
+.main-container {
+    flex: 1;
+    display: flex;
+    /* Remove default container padding to avoid right-side gap */
+    padding-left: 0;
+    padding-right: 0;
+}
+
+/* ============================================
+   Sidebar Styling
+   ============================================ */
+
+.sidebar {
+    width: var(--sidebar-width);
+    background-color: #f8f9fa;
+    border-right: 1px solid #dee2e6;
+    overflow-y: auto;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.sidebar-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.sidebar-header {
+    background-color: #f8f9fa;
+    color: #6c757d;
+}
+
+.sidebar-header h6 {
+    letter-spacing: 0.5px;
+}
+
+.sidebar-nav {
+    flex: 1;
+    gap: 0.25rem;
+}
+
+.sidebar-nav .nav-link {
+    color: #495057;
+    padding: 0.75rem 1rem;
+    border-radius: 0.375rem;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.95rem;
+}
+
+.sidebar-nav .nav-link i {
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.sidebar-nav .nav-link:hover {
+    background-color: #e9ecef;
+    color: var(--primary-color);
+}
+
+.sidebar-nav .nav-link.active {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+/* Collapsible Menu Items */
+.nav-link.collapsed .bi-chevron-down {
+    transform: rotate(0deg);
+    transition: var(--transition);
+}
+
+.nav-link:not(.collapsed) .bi-chevron-down {
+    transform: rotate(180deg);
+}
+
+/* Badge Styling */
+.badge {
+    font-size: 0.75rem;
+    padding: 0.35rem 0.65rem;
+    font-weight: 600;
+}
+
+/* Nested Navigation */
+.sidebar-nav .nav-item .collapse .nav-link {
+    padding-left: 2.5rem;
+    font-size: 0.9rem;
+    color: #6c757d;
+}
+
+.sidebar-nav .nav-item .collapse .nav-link:hover {
+    background-color: #e9ecef;
+    color: var(--primary-color);
+}
+
+.sidebar-nav .nav-item .collapse .nav-link.active {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+/* Sidebar Footer */
+.sidebar-footer {
+    border-top: 1px solid #dee2e6;
+    background-color: #f8f9fa;
+    margin-top: auto;
+}
+
+/* ============================================
+   Main Content Area
+   ============================================ */
+
+.main-content {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    background-color: #ffffff;
+    /* Ensure content uses full width with no right-side spacing */
+    padding: 0;
+    margin: 0;
+}
+
+.main-body {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    /* Remove any residual spacing on the right */
+    padding: 0;
+    margin: 0;
+}
+
+/* Remove Bootstrap container padding inside our main layout */
+.container-fluid.main-container,
+.container-fluid .main-content,
+.container-fluid .main-body {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+}
+
+/* Make tile map and runs containers expand fully */
+.map-wrapper,
+.runs-container {
+    width: 100%;
+}
+
+/* Ensure Leaflet map touches the right edge with no gap */
+#map {
+    width: 100%;
+}
+
+/* Breadcrumb */
+.breadcrumb {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.breadcrumb-item a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.breadcrumb-item a:hover {
+    text-decoration: underline;
+}
+
+/* ============================================
+   Scrollbar Styling
+   ============================================ */
+
+.sidebar::-webkit-scrollbar,
+.main-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.sidebar::-webkit-scrollbar-track,
+.main-body::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.sidebar::-webkit-scrollbar-thumb,
+.main-body::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover,
+.main-body::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* ============================================
+   Responsive Design
+   ============================================ */
+
+@media (max-width: 768px) {
+    :root {
+        --sidebar-width: 250px;
+    }
+
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: var(--navbar-height);
+        height: calc(100vh - var(--navbar-height));
+        z-index: 1020;
+        box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .sidebar.collapsed {
+        transform: translateX(-100%);
+    }
+
+    .main-container {
+        margin-top: var(--navbar-height);
+    }
+
+    .main-content {
+        width: 100%;
+    }
+
+    .sidebar-nav .nav-item .collapse .nav-link {
+        padding-left: 3rem;
+    }
+}
+
+@media (max-width: 576px) {
+    :root {
+        --sidebar-width: 200px;
+    }
+
+    .navbar-brand span {
+        display: none;
+    }
+
+    .navbar-brand .me-2 {
+        margin-right: 0 !important;
+    }
+
+    .sidebar-nav .nav-link span {
+        font-size: 0.85rem;
+    }
+
+    .badge {
+        font-size: 0.7rem;
+        padding: 0.25rem 0.5rem;
+    }
+
+    .main-body {
+        padding: 1rem !important;
+    }
+}
+
+/* ============================================
+   Alert Styling
+   ============================================ */
+
+.alert-container {
+    margin-bottom: 1.5rem;
+}
+
+.alert {
+    border: none;
+    border-left: 4px solid;
+}
+
+.alert-info {
+    border-left-color: #0dcaf0;
+    background-color: #cff4fc;
+    color: #055160;
+}
+
+.alert-success {
+    border-left-color: #198754;
+    background-color: #d1e7dd;
+    color: #0f5132;
+}
+
+.alert-warning {
+    border-left-color: #ffc107;
+    background-color: #fff3cd;
+    color: #664d03;
+}
+
+.alert-danger {
+    border-left-color: #dc3545;
+    background-color: #f8d7da;
+    color: #842029;
+}
+
+/* ============================================
+   Card Styling
+   ============================================ */
+
+.card {
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    transition: var(--transition);
+}
+
+.card:hover {
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+.card-header {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+
+/* ============================================
+   Table Styling
+   ============================================ */
+
+.table {
+    margin-bottom: 0;
+}
+
+.table thead th {
+    background-color: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+    font-weight: 600;
+    color: #495057;
+}
+
+.table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+/* ============================================
+   Button Styling
+   ============================================ */
+
+.btn {
+    transition: var(--transition);
+    border-radius: 0.375rem;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================
+   Footer Styling
+   ============================================ */
+
+footer {
+    margin-top: auto;
+    background-color: #f8f9fa;
+}
+
+footer a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+footer a:hover {
+    text-decoration: underline;
+}
+
+/* ============================================
+   Text Utilities
+   ============================================ */
+
+.text-muted {
+    color: #6c757d !important;
+}
+
+/* ============================================
+   Animation
+   ============================================ */
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.main-body > * {
+    animation: slideIn 0.3s ease;
+}
+
+/* ============================================
+   Dark Mode Support (Optional)
+   ============================================ */
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --sidebar-bg: #1e1e1e;
+        --text-color: #e0e0e0;
+    }
+
+    body {
+        background-color: #121212;
+        color: var(--text-color);
+    }
+
+    .sidebar {
+        background-color: #1e1e1e;
+        border-right-color: #333;
+    }
+
+    .sidebar-header {
+        background-color: #1e1e1e;
+    }
+
+    .sidebar-nav .nav-link {
+        color: #b0b0b0;
+    }
+
+    .sidebar-nav .nav-link:hover {
+        background-color: #2a2a2a;
+        color: #fff;
+    }
+
+    .main-content {
+        background-color: #1e1e1e;
+        color: var(--text-color);
+    }
+
+    .breadcrumb {
+        background-color: #1e1e1e;
+        border-bottom-color: #333;
+    }
+
+    .card {
+        background-color: #2a2a2a;
+        border-color: #333;
+        color: var(--text-color);
+    }
+
+    .table {
+        color: var(--text-color);
+    }
+
+    .table thead th {
+        background-color: #2a2a2a;
+        border-bottom-color: #333;
+    }
+
+    .table tbody tr:hover {
+        background-color: #2a2a2a;
+    }
+}

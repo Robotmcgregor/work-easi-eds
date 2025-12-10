@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+
+{% block title %}EDS Runs - Management{% endblock %}
+
+{% block extra_css %}
+<style>
+    .runs-container {
+        padding: 20px;
+    }
+    
+    .runs-header {
+        margin-bottom: 30px;
+    }
+    
+    .runs-header h2 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+    
+    .filters-section {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 25px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    
+    .filter-group {
+        display: flex;
+        gap: 15px;
+        flex-wrap: wrap;
+        align-items: flex-end;
+    }
+    
+    .filter-group .form-group {
+        flex: 1;
+        min-width: 250px;
+        margin-bottom: 0;
+    }
+    
+    .filter-group .form-label {
+        font-weight: 600;
+        margin-bottom: 8px;
+        color: #333;
+    }
+    
+    .filter-group .form-control,
+    .filter-group .form-select {
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 10px 12px;
+    }
+    
+    .filter-group .form-control:focus,
+    .filter-group .form-select:focus {
+        border-color: #0d6efd;
+        box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
+    }
+    
+    .filter-buttons {
+        display: flex;
+        gap: 10px;
+    }
+    
+    .filter-buttons .btn {
+        padding: 10px 20px;
+        font-weight: 500;
+    }
+    
+    .results-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding: 15px 0;
+        border-bottom: 2px solid #f0f0f0;
+    }
+    
+    .results-count {
+        font-size: 1rem;
+        color: #666;
+    }
+    
+    .runs-list {
+        display: grid;
+        gap: 20px;
+    }
+    
+    .run-card {
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        overflow: hidden;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    
+    .run-card:hover {
+        box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+        border-color: #0d6efd;
+        transform: translateY(-2px);
+    }
+    
+    .run-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    .run-card-header h3 {
+        margin: 0;
+        font-size: 1.3rem;
+        font-weight: 600;
+    }
+    
+    .run-card-header .badge {
+        background: rgba(255,255,255,0.3);
+        color: white;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+    }
+    
+    .run-card-body {
+        padding: 20px;
+    }
+    
+    .run-description {
+        color: #666;
+        margin-bottom: 15px;
+        font-size: 0.95rem;
+        line-height: 1.5;
+    }
+    
+    .run-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+    
+    .stat-item {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 6px;
+        border-left: 4px solid #0d6efd;
+    }
+    
+    .stat-item.success {
+        border-left-color: #198754;
+    }
+    
+    .stat-item.warning {
+        border-left-color: #ffc107;
+    }
+    
+    .stat-item.info {
+        border-left-color: #0dcaf0;
+    }
+    
+    .stat-label {
+        font-size: 0.85rem;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+        font-weight: 600;
+    }
+    
+    .stat-value {
+        font-size: 1.8rem;
+        font-weight: bold;
+        color: #333;
+    }
+    
+    .run-actions {
+        display: flex;
+        gap: 10px;
+        padding-top: 15px;
+        border-top: 1px solid #eee;
+        margin-top: 15px;
+    }
+    
+    .run-actions .btn {
+        flex: 1;
+        padding: 10px 15px;
+        font-size: 0.9rem;
+        text-align: center;
+    }
+    
+    .pagination {
+        margin-top: 30px;
+        justify-content: center;
+    }
+    
+    .pagination .page-link {
+        color: #0d6efd;
+        border-color: #ddd;
+    }
+    
+    .pagination .page-link:hover {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+        color: white;
+    }
+    
+    .pagination .page-item.active .page-link {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #999;
+    }
+    
+    .empty-state i {
+        font-size: 3rem;
+        margin-bottom: 20px;
+        opacity: 0.5;
+    }
+    
+    .empty-state h4 {
+        margin-bottom: 10px;
+        color: #666;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="runs-container">
+    <!-- Header -->
+    <div class="runs-header">
+        <h2><i class="bi bi-play-circle"></i> EDS Processing Runs</h2>
+        <p class="text-muted">Manage and monitor all EDS processing runs and their results</p>
+    </div>
+    
+    <!-- Filters -->
+    <div class="filters-section">
+        <form method="get" id="filterForm">
+            <div class="filter-group">
+                <div class="form-group">
+                    <label for="search" class="form-label">Search Runs:</label>
+                    <input 
+                        type="text" 
+                        id="search" 
+                        name="search" 
+                        class="form-control" 
+                        placeholder="Search by run ID or description..."
+                        value="{{ search }}"
+                    >
+                </div>
+                
+                <div class="filter-buttons">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="?{% if page_obj %}page={{ page_obj.number }}{% endif %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-clockwise"></i> Reset
+                    </a>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Results Info -->
+    {% if runs %}
+    <div class="results-info">
+        <div class="results-count">
+            Showing <strong>{{ runs|length }}</strong> of <strong>{{ total_runs }}</strong> runs
+            {% if search %}<span class="text-muted">(filtered by: "{{ search }}")</span>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Runs List -->
+    {% if runs %}
+    <div class="runs-list">
+        {% for run in runs %}
+        <div class="run-card">
+            <div class="run-card-header">
+                <div>
+                    <h3>{{ run.run_id }}</h3>
+                </div>
+                <div class="badge">Run #{{ run.run_number }}</div>
+            </div>
+            
+            <div class="run-card-body">
+                {% if run.description %}
+                <p class="run-description">{{ run.description }}</p>
+                {% endif %}
+                
+                <!-- Stats Grid -->
+                <div class="run-stats">
+                    <div class="stat-item">
+                        <div class="stat-label">Total Tiles</div>
+                        <div class="stat-value">{{ run.total_tiles }}</div>
+                    </div>
+                    
+                    <div class="stat-item success">
+                        <div class="stat-label">Detections</div>
+                        <div class="stat-value">{{ run.detection_total }}</div>
+                    </div>
+                    
+                    <div class="stat-item warning">
+                        <div class="stat-label">Cleared</div>
+                        <div class="stat-value">{{ run.cleared_total }}</div>
+                    </div>
+                    
+                    <div class="stat-item info">
+                        <div class="stat-label">Not Cleared</div>
+                        <div class="stat-value">{{ run.not_cleared_total }}</div>
+                    </div>
+                </div>
+                
+                <!-- Run Details -->
+                <div class="row text-muted" style="font-size: 0.9rem; margin-bottom: 15px;">
+                    <div class="col-md-6">
+                        <p><strong>Created:</strong> {{ run.created_at|date:"Y-m-d H:i" }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Total Detections:</strong> {{ run.total_detections }}</p>
+                    </div>
+                </div>
+                
+                <!-- Actions -->
+                <div class="run-actions">
+                    <a href="/admin/runs/edsrun/{{ run.run_id }}/change/" class="btn btn-sm btn-primary">
+                        <i class="bi bi-pencil"></i> Edit Details
+                    </a>
+                    <a href="/admin/runs/edsresult/?run__run_id={{ run.run_id }}" class="btn btn-sm btn-info">
+                        <i class="bi bi-list"></i> View Results ({{ run.total_tiles }})
+                    </a>
+                    <a href="/admin/detection/detection/?run__run_id={{ run.run_id }}" class="btn btn-sm btn-warning">
+                        <i class="bi bi-exclamation-circle"></i> Detections ({{ run.total_detections }})
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <!-- Pagination -->
+    {% if page_obj.has_other_pages %}
+    <nav aria-label="Page navigation">
+        <ul class="pagination">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?search={{ search }}&page=1">First</a>
+            </li>
+            <li class="page-item">
+                <a class="page-link" href="?search={{ search }}&page={{ page_obj.previous_page_number }}">Previous</a>
+            </li>
+            {% endif %}
+            
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                <li class="page-item active">
+                    <span class="page-link">{{ num }}</span>
+                </li>
+                {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                <li class="page-item">
+                    <a class="page-link" href="?search={{ search }}&page={{ num }}">{{ num }}</a>
+                </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if page_obj.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?search={{ search }}&page={{ page_obj.next_page_number }}">Next</a>
+            </li>
+            <li class="page-item">
+                <a class="page-link" href="?search={{ search }}&page={{ page_obj.paginator.num_pages }}">Last</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+    
+    {% else %}
+    <!-- Empty State -->
+    <div class="empty-state">
+        <i class="bi bi-inbox"></i>
+        <h4>No Runs Found</h4>
+        <p>There are no EDS runs matching your search criteria.</p>
+        <a href="?" class="btn btn-primary mt-3">
+            <i class="bi bi-arrow-clockwise"></i> Clear Filters
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
