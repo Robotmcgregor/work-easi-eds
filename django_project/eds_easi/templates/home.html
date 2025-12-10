@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}EDS Dashboard{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="row g-3">
+    <div class="col-md-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Tile Map</h5>
+          <p class="card-text">Explore Landsat tiles and select areas to process.</p>
+          <a href="/tiles/map/" class="btn btn-primary">Open Tile Map</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Processing</h5>
+          <p class="card-text">Launch FC/SR runs with defaults and monitor status.</p>
+          <a href="/processing/" class="btn btn-primary">Open Processing</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Runs</h5>
+          <p class="card-text">Review previous executions and outputs.</p>
+          <a href="/runs/" class="btn btn-primary">View Runs</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Data Collection</h5>
+          <p class="card-text">Run LS8/9 SR+FC collection pipeline (query + season filter + download).</p>
+          <a href="/data/collection/" class="btn btn-primary">Open Collection</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
