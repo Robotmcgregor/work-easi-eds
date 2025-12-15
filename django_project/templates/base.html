@@ -23,7 +23,7 @@
         <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top">
             <div class="container-fluid">
                 <!-- Brand/Logo -->
-                <a class="navbar-brand d-flex align-items-center" href="/">
+                <a class="navbar-brand d-flex align-items-center" href="{% url 'home' %}">
                     <i class="bi bi-globe-americas me-2"></i>
                     <span class="fw-bold">EDS</span>
                     <span class="ms-1 small" style="opacity: 0.9;">Admin</span>
@@ -39,7 +39,7 @@
                 <div class="collapse navbar-collapse" id="navbarNav">
                     <ul class="navbar-nav ms-auto">
                         <li class="nav-item">
-                            <a class="nav-link" href="/">Dashboard</a>
+                            <a class="nav-link" href="{% url 'home' %}">Dashboard</a>
                         </li>
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" 
@@ -82,7 +82,7 @@
                         <ul class="nav flex-column nav-pills sidebar-nav p-3">
                             <!-- Dashboard -->
                             <li class="nav-item mb-1">
-                                <a class="nav-link" href="/" data-section="dashboard">
+                                <a class="nav-link" href="{% url 'home' %}" data-section="dashboard">
                                     <i class="bi bi-speedometer2"></i>
                                     <span>Dashboard</span>
                                 </a>
@@ -99,18 +99,18 @@
                                 <div class="collapse" id="dataCollapse">
                                     <ul class="nav flex-column ms-3 mt-2">
                                         <li class="nav-item">
-                                            <a class="nav-link" href="/tiles/map/" data-section="tiles">
+                                            <a class="nav-link" href="{% url 'tile_map' %}" data-section="tiles">
                                                 <i class="bi bi-map"></i> Tile Map
                                                 <span class="badge bg-info ms-auto">466</span>
                                             </a>
                                         </li>
                                         <li class="nav-item">
-                                            <a class="nav-link" href="/tiles/all/" data-section="tiles-all">
+                                            <a class="nav-link" href="{% url 'tiles_list' %}" data-section="tiles-all">
                                                 <i class="bi bi-grid-3x3-gap"></i> All Tiles
                                             </a>
                                         </li>
                                         <li class="nav-item">
-                                            <a class="nav-link" href="/data/collection/" data-section="collection">
+                                            <a class="nav-link" href="{% url 'collection_page' %}" data-section="collection">
                                                 <i class="bi bi-cloud-download"></i> LS8/9 SR+FC Collection
                                             </a>
                                         </li>
@@ -130,7 +130,7 @@
                                 <div class="collapse" id="processingCollapse">
                                     <ul class="nav flex-column ms-3 mt-2">
                                         <li class="nav-item">
-                                            <a class="nav-link" href="/runs/" data-section="runs">
+                                            <a class="nav-link" href="{% url 'runs_list' %}" data-section="runs">
                                                 <i class="bi bi-play-circle"></i> EDS Runs
                                                 <span class="badge bg-success ms-auto">3</span>
                                             </a>
@@ -142,7 +142,7 @@
                                             </a>
                                         </li>
                                         <li class="nav-item">
-                                            <a class="nav-link" href="/processing/" data-section="processing-ad-hoc">
+                                            <a class="nav-link" href="{% url 'processing_page' %}" data-section="processing-ad-hoc">
                                                 <i class="bi bi-gear-wide-connected"></i> Ad-hoc Processing
                                             </a>
                                         </li>
@@ -188,17 +188,19 @@
                                 <div class="collapse" id="validationCollapse">
                                     <ul class="nav flex-column ms-3 mt-2">
                                         <li class="nav-item">
-                                            <a class="nav-link" href="/qc/validations/" data-section="qc-validations">
+                                            <a class="nav-link" href="{% url 'qc_validations_list' %}" data-section="qc-validations">
                                                 <i class="bi bi-clipboard-check"></i> QC Validations
                                             </a>
                                         </li>
                                         <li class="nav-item">
-                                            <a class="nav-link" href="/admin/validation/qcvalidation/" data-section="qc-admin">
+                                            <a class="nav-link" href="{% url 'admin:validation_qcvalidation_changelist' %}" data-section="qc-admin">
+
                                                 <i class="bi bi-gear"></i> QC Admin
                                             </a>
                                         </li>
                                         <li class="nav-item">
-                                            <a class="nav-link" href="/admin/validation/qcauditlog/" data-section="audit">
+                                            <a class="nav-link" href="{% url 'admin:validation_qcauditlog_changelist' %}" data-section="audit">
+
                                                 <i class="bi bi-file-text"></i> Audit Log
                                                 <span class="badge bg-secondary ms-auto">0</span>
                                             </a>
@@ -274,7 +276,7 @@
                     {% block breadcrumb %}
                     <nav aria-label="breadcrumb" class="bg-light p-3 border-bottom">
                         <ol class="breadcrumb mb-0">
-                            <li class="breadcrumb-item"><a href="/">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{% url 'home' %}">Dashboard</a></li>
                             {% block breadcrumb_items %}{% endblock %}
                         </ol>
                     </nav>

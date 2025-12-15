@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,7 +26,29 @@ SECRET_KEY = 'django-insecure-qe+9!8jju$^h6btwui^ezqqd3nm3e4@t0djdk^n&1vtqy=o605
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+# ALLOWED_HOSTS = ["*"]
+
+ALLOWED_HOSTS = [
+    "hub.dcceew.easi-eo.solutions",
+    "localhost",
+    "127.0.0.1",
+]
+
+# Jupyter Hub proxy
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://hub.dcceew.easi-eo.solutions",
+]
+
+
+
+# JupyterHub prefix, e.g. "/user/robotmcgregor/"
+JH_PREFIX = os.environ.get("JUPYTERHUB_SERVICE_PREFIX", "/")
+
+# If you're running on 8001:
+FORCE_SCRIPT_NAME = JH_PREFIX + "proxy/8001"
 
 
 # Application definition

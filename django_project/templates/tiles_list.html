@@ -81,7 +81,8 @@
             {% endif %}
           </td>
           <td class="text-end">
-            <a class="btn btn-sm btn-outline-primary" href="/tiles/map/?tile={{ t.tile_id }}">
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'tile_map' %}?tile={{ t.tile_id|urlencode }}">
+
               <i class="bi bi-map"></i> View on Map
             </a>
             <a class="btn btn-sm btn-outline-info" href="/admin/catalog/landsattile/{{ t.id }}/change/">
