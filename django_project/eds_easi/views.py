@@ -563,3 +563,58 @@ def qc_submit_review(request):
         }
     )
     return JsonResponse({"id": str(qc.id), "status": qc.qc_status, "created": created})
+
+
+@csrf_exempt
+def run_pipeline_api(request):
+    """
+    API endpoint to trigger master EDS processing pipeline
+    
+    POST JSON body:
+    {
+        "tiles": ["p104r070", "p105r069"],
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31"
+    }
+    
+    Response:
+    {
+        "status": "success|error|timeout",
+        "returncode": <int>,
+        "stdout": "<output>",
+        "stderr": "<errors>",
+        "timestamp": "2024-12-15T10:30:00.000000",
+        "command": "<full command>"
+    }
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    
+    try:
+        from .pipeline_executor import PipelineExecutor
+        
+        tiles = data.get('tiles')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        timeout = data.get('timeout', 3600)
+        
+        result = PipelineExecutor.run(
+            tiles=tiles,
+            start_date=start_date,
+            end_date=end_date,
+            timeout=timeout
+        )
+        
+        return JsonResponse(result)
+    
+    except Exception as e:
+        return JsonResponse(
+            {"error": str(e), "status": "error"},
+            status=500
+        )
+
