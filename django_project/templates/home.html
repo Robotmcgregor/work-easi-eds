@@ -26,7 +26,8 @@
                             <i class="bi bi-grid-3x3-gap"></i>
                         </div>
                     </div>
-                    <a href="/tiles/map/" class="btn btn-sm btn-outline-primary mt-3">View Map</a>
+                    <a href="{% url 'tile_map' %}" class="btn btn-sm btn-outline-primary mt-3">View Map</a>
+
                 </div>
             </div>
         </div>
@@ -124,33 +125,40 @@
 
     <!-- Quick Access Section -->
     <div class="row mb-5">
-        <div class="col-md-12">
-            <h4 class="mb-3">Quick Access</h4>
-            <div class="btn-group" role="group">
-                <a href="/tiles/map/" class="btn btn-outline-primary">
-                    <i class="bi bi-map"></i> Tile Map
-                </a>
-                <a href="/runs/" class="btn btn-outline-primary">
-                    <i class="bi bi-play-circle"></i> Runs
-                </a>
-                <a href="/processing/" class="btn btn-outline-primary">
-                    <i class="bi bi-gear-wide-connected"></i> Processing
-                </a>
-                <a href="/admin/detection/detection/" class="btn btn-outline-primary">
-                    <i class="bi bi-exclamation-circle"></i> Detections
-                </a>
-                <a href="/admin/validation/qcvalidation/" class="btn btn-outline-primary">
-                    <i class="bi bi-check-circle"></i> Validations
-                </a>
-                <a href="/admin/" class="btn btn-outline-primary">
-                    <i class="bi bi-gear"></i> Admin
-                </a>
-                <a href="/data/collection/" class="btn btn-outline-primary">
-                    <i class="bi bi-cloud-download"></i> Data Collection
-                </a>
-            </div>
+    <div class="col-md-12">
+        <h4 class="mb-3">Quick Access</h4>
+        <div class="btn-group" role="group">
+        <a href="{% url 'tile_map' %}" class="btn btn-outline-primary">
+            <i class="bi bi-map"></i> Tile Map
+        </a>
+
+        <a href="{% url 'runs_list' %}" class="btn btn-outline-primary">
+            <i class="bi bi-play-circle"></i> Runs
+        </a>
+
+        <a href="{% url 'processing_page' %}" class="btn btn-outline-primary">
+            <i class="bi bi-gear-wide-connected"></i> Processing
+        </a>
+
+        <a href="{% url 'admin:detection_edsdetection_changelist' %}" class="btn btn-outline-primary">
+            <i class="bi bi-exclamation-circle"></i> Detections
+        </a>
+
+        <a href="{% url 'admin:validation_qcvalidation_changelist' %}" class="btn btn-outline-primary">
+            <i class="bi bi-check-circle"></i> Validations
+        </a>
+
+        <a href="{% url 'admin:index' %}" class="btn btn-outline-primary">
+            <i class="bi bi-gear"></i> Admin
+        </a>
+
+        <a href="{% url 'collection_page' %}" class="btn btn-outline-primary">
+            <i class="bi bi-cloud-download"></i> Data Collection
+        </a>
         </div>
     </div>
+    </div>
+
 
     <!-- System Info -->
     <div class="row">

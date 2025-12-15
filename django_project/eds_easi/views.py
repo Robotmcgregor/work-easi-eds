@@ -178,7 +178,7 @@ from runs.models import EDSRun, EDSResult
 import json
 
 
-@method_decorator(login_required, name='dispatch')
+# @method_decorator(login_required, name='dispatch')
 class HomeView(TemplateView):
     """Homepage view for EDS Admin Dashboard"""
     template_name = 'home.html'
@@ -310,7 +310,7 @@ def import_tiles_from_shapefile(request):
     return JsonResponse({"created": created, "updated": updated})
 
 
-@method_decorator(login_required, name='dispatch')
+# @method_decorator(login_required, name='dispatch')
 class TileMapView(TemplateView):
     """Interactive map view showing Landsat tile grid over Australia"""
     template_name = 'tile_map.html'
@@ -352,7 +352,9 @@ class TileMapView(TemplateView):
         context['active_tiles'] = tiles.filter(is_active=True).count()
         
         return context
-@method_decorator(login_required, name='dispatch')
+
+
+# @method_decorator(login_required, name='dispatch')
 class TilesListView(ListView):
     """All Tiles table view with filters and styling."""
     template_name = 'tiles_list.html'
@@ -386,7 +388,7 @@ class TilesListView(ListView):
         return ctx
 
 
-@method_decorator(login_required, name='dispatch')
+# @method_decorator(login_required, name='dispatch')
 class RunsListView(TemplateView):
     """List view for EDS Runs with filtering"""
     template_name = 'runs_list.html'
@@ -437,7 +439,7 @@ class RunsListView(TemplateView):
         return context
 
 
-@method_decorator(login_required, name='dispatch')
+# @method_decorator(login_required, name='dispatch')
 class QCValidationsListView(ListView):
     """QC Validations dashboard - list all validations with filters and metrics."""
     template_name = 'qc_validations_list.html'
@@ -492,7 +494,7 @@ class QCValidationsListView(ListView):
         return ctx
 
 
-@method_decorator(login_required, name='dispatch')
+# @method_decorator(login_required, name='dispatch')
 class QCReviewView(TemplateView):
     """QC Review page: map + detection details + form to submit validation."""
     template_name = 'qc_review.html'
