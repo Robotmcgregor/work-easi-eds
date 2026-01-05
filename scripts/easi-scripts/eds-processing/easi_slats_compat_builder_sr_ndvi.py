@@ -472,6 +472,12 @@ def main(argv=None) -> int:
         action="store_true",
         help="Build NDVI dc4 only; require db8 exists already",
     )
+    ap.add_argument(
+    "--dc4-tag",
+    default="dc4mz",
+    help="Suffix tag for dc4 outputs (e.g. dc4mz, dc4ndvi). Default: dc4mz",
+    )
+
 
     args = ap.parse_args(argv)
 

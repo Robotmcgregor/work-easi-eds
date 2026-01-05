@@ -900,7 +900,7 @@ def main():
 
     ap.add_argument(
         "--timeseries-source",
-        choices=["fc", "sr", "ndvi"],
+        choices=["fc", "fpc", "sr", "ndvi"],
         default="fc",
         help=(
             "Source for time-series stack: "
@@ -987,8 +987,9 @@ def main():
     results["inputs"].setdefault("fc", {})
     results["inputs"].setdefault("sr", {})
 
-    if args.timeseries_source == "fc":
-        print("running on FC data")
+    if args.timeseries_source in ("fc", "fpc"):
+        print(f"running on FC-derived data ({args.timeseries_source})")
+
         base_root = args.fc_root or ""
         fc_glob = getattr(args, "fc_glob", None)
 
@@ -1006,10 +1007,13 @@ def main():
 
         fc_files = expand_patterns(fc_patterns, "FC", limit=30)
 
-        # Log FC inputs to JSON (FC mode only)
-        results["inputs"]["fc"]["patterns"] = list(map(str, fc_patterns))
-        results["inputs"]["fc"]["matched_files"] = sorted(map(str, fc_files))
-        results["inputs"]["fc"]["matched_count"] = len(fc_files)
+        src = args.timeseries_source  # "fc" or "fpc"
+
+        results["inputs"].setdefault(src, {})
+        results["inputs"][src]["patterns"] = list(map(str, fc_patterns))
+        results["inputs"][src]["matched_files"] = sorted(map(str, fc_files))
+        results["inputs"][src]["matched_count"] = len(fc_files)
+
 
         if len(fc_files) == 0:
             raise SystemExit(
@@ -1040,10 +1044,13 @@ def main():
 
         sr_files = expand_patterns(sr_patterns, "SR", limit=30)
 
-        # Log SR inputs to JSON (SR/NDVI mode only)
-        results["inputs"]["sr"]["patterns"] = list(map(str, sr_patterns))
-        results["inputs"]["sr"]["matched_files"] = sorted(map(str, sr_files))
-        results["inputs"]["sr"]["matched_count"] = len(sr_files)
+        src = args.timeseries_source  # "sr" or "ndvi"
+
+        results["inputs"].setdefault(src, {})
+        results["inputs"][src]["patterns"] = list(map(str, sr_patterns))
+        results["inputs"][src]["matched_files"] = sorted(map(str, sr_files))
+        results["inputs"][src]["matched_count"] = len(sr_files)
+
 
         if len(sr_files) == 0:
             raise SystemExit(
@@ -1101,7 +1108,9 @@ def main():
     # sys.exit("troubleshooting")
 
     # ----------------------------------------------------------------------
-    # 5. Derive seasonal window (MMDD range) for FC baseline
+    # 5. Derive seasonal window (MMDD range) for time-series baseline
+    #    (applies to FC, FPC, and NDVI)
+
     # ----------------------------------------------------------------------
     # The seasonal window controls which FC/FPC dates are used to build
     # the baseline time-series (e.g. within ±2 months around start/end).
@@ -1211,7 +1220,7 @@ def main():
         "effective_start_date": eff_start,
         "effective_end_date": eff_end,
 
-        "sr": {
+        "sr_inputs": {
             "sr_only_clr": bool(args.sr_only_clr),
             "sr_root": args.sr_root,
             "fc_root_fallback": args.fc_root,
@@ -1221,11 +1230,13 @@ def main():
             "end_path": sr_end_path,
         },
 
-        "fc": {
+
+        "fc_inputs": {
             "fc_only_clr": bool(getattr(args, "fc_only_clr", False)),
             "fc_root": getattr(args, "fc_root", None),
             "fc_glob": getattr(args, "fc_glob", None),
         },
+
 
         "seasonal_window": {
             "explicit": bool(getattr(args, "season_window", None)),
@@ -1266,13 +1277,22 @@ def main():
     pyexe = args.python_exe or sys.executable
     import glob as _glob
 
+    dc4_tag = {
+    "fc": "dc4fc",
+    "fpc": "dc4fpc",
+    "ndvi": "dc4ndvi",
+    }.get(args.timeseries_source, "dc4mz")
+
+
     # Always define expected outputs (these must exist as variables even if we skip build)
     db8_start = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
     db8_end   = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
-    dc4_glob  = str(compat_dir / f"lztmre_{scene}_*_dc4mz.img")
+    dc4_glob = str(compat_dir / f"lztmre_{scene}_*_{dc4_tag}.img")
+
+
 
     # Look for existing dc4 stack members
-    dc4_existing = _glob.glob(str(compat_dir / f"lztmre_{scene}_*_dc4mz.img"))
+    dc4_existing = _glob.glob(dc4_glob)
 
     # Decide whether we need to (re)build compat products
     need_compat = args.force_compat or (
@@ -1283,15 +1303,16 @@ def main():
 
     if need_compat:
         # Compat builder script
-        if args.timeseries_source == "fc":
+        if args.timeseries_source in ("fc", "fpc"):
+
             compat_script = Path(__file__).resolve().parent / "easi_slats_compat_builder_fc.py"
         elif args.timeseries_source in ("sr", "ndvi"):
             compat_script = Path(__file__).resolve().parent / "easi_slats_compat_builder_sr_ndvi.py"
         else:
             raise ValueError(f"Unknown timeseries_source: {args.timeseries_source}")
 
-        if args.timeseries_source == "fc":
-            # ---- FC: one call builds the whole FC series + start/end db8 ----
+        if args.timeseries_source in ("fc", "fpc"):
+
             cmd_compat = [
                 pyexe,
                 str(compat_script),
@@ -1303,6 +1324,9 @@ def main():
                 "--sr-date", eff_end,
             ]
 
+            # NEW: ensure dc4 name is explicit (dc4fc / dc4fpc)
+            cmd_compat.extend(["--dc4-tag", dc4_tag])
+
             for pat in fc_patterns:
                 cmd_compat.extend(["--fc", pat])
 
@@ -1311,20 +1335,22 @@ def main():
             if args.fc_prefer_clr:
                 cmd_compat.append("--fc-prefer-clr")
 
-            if args.fc_convert_to_fpc:
+            # NEW: FPC conversion is controlled by timeseries_source, not a separate flag
+            if args.timeseries_source == "fpc":
                 cmd_compat.append("--fc-convert-to-fpc")
                 cmd_compat.extend(["--fc-k", str(args.fc_k), "--fc-n", str(args.fc_n)])
                 if args.fc_nodata is not None:
                     cmd_compat.extend(["--fc-nodata", str(args.fc_nodata)])
 
-            # Record the SR inputs used to build compat (FC mode)
             results.setdefault("inputs", {}).setdefault("compat_build", {})
-            results["inputs"]["compat_build"]["mode"] = "fc"
+            results["inputs"]["compat_build"]["mode"] = args.timeseries_source
+            results["inputs"]["compat_build"]["dc4_tag"] = dc4_tag
             results["inputs"]["compat_build"]["sr_start"] = {"date": eff_start, "path": str(sr_start_path)}
             results["inputs"]["compat_build"]["sr_end"]   = {"date": eff_end,   "path": str(sr_end_path)}
             results["inputs"]["compat_build"]["fc_patterns"] = list(map(str, fc_patterns))
 
             run_cmd(cmd_compat, args.dry_run, "build_compat", results)
+
 
 
         elif args.timeseries_source == "ndvi":
@@ -1423,7 +1449,9 @@ def main():
                 run_cmd(cmd_dc4, args.dry_run, f"build_dc4_{d}", results)
 
             # Sanity: confirm dc4 exists where legacy step will look
-            dc4_existing = _glob.glob(str(compat_dir / f"lztmre_{scene}_*_dc4mz.img"))
+            # dc4_existing = _glob.glob(str(compat_dir / f"lztmre_{scene}_*_dc4mz.img"))
+            dc4_existing = _glob.glob(str(compat_dir / f"lztmre_{scene}_*_{dc4_tag}.img"))
+
             print(f"[DEBUG] Produced dc4mz.img count: {len(dc4_existing)}")
             for p in sorted(dc4_existing)[:10]:
                 print("  ", p)
@@ -1452,20 +1480,6 @@ def main():
     sys.exit("forced stop section 7")
 
     # ----------------------------------------------------------------------
-    # Optional fallback: if some older scripts write outputs to CWD, pick them up
-    # ----------------------------------------------------------------------
-    # if not db8_start.exists():
-    #     alt = Path(f"lztmre_{scene}_{eff_start}_db8mz.img")
-    #     if alt.exists():
-    #         db8_start = alt
-
-    # if not db8_end.exists():
-    #     alt = Path(f"lztmre_{scene}_{eff_end}_db8mz.img")
-    #     if alt.exists():
-    #         db8_end = alt
-
-
-    # ----------------------------------------------------------------------
     # 8. Step 2: Legacy change detection (DLL / DLJ)
     # ----------------------------------------------------------------------
     # This step runs the *legacy EDS change detection algorithm*.
@@ -1491,7 +1505,7 @@ def main():
     # ----------------------------------------------------------------------
     # FC mode → FPC/FC-specific logic
     # SR/NDVI mode → spectral reflectance / NDVI logic
-    if args.timeseries_source == "fc":
+    if args.timeseries_source in ("fc", "fpc"):
         legacy_script = Path(__file__).resolve().parent / "easi_eds_legacy_method_window_fc.py"
     elif args.timeseries_source == "ndvi":
         legacy_script = Path(__file__).resolve().parent / "easi_eds_legacy_method_window_sr_ndvi.py"
