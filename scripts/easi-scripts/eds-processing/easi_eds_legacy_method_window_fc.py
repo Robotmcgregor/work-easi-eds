@@ -689,6 +689,13 @@ def main(argv=None) -> int:
         action="store_true",
         help="Print extra information (baseline dates, output paths)",
     )
+
+    ap.add_argument(
+    "--dc4-tag",
+    default="dc4mz",
+    help="Suffix tag for dc4 images (e.g. dc4mz, dc4fpc, dc4fc, dc4ndvi). Default: dc4mz",
+    )
+
     args = ap.parse_args(argv)
 
     # Normalise scene code to lower case (e.g. 'P104R072' -> 'p104r072')
@@ -731,14 +738,14 @@ def main(argv=None) -> int:
     # dc4 images hold the fractional cover (FPC) stack over many dates.
     # Prefer an explicit glob pattern if the user gives one; otherwise,
     # look in the standard compat directory for this scene.
+    dc4_tag = args.dc4_tag
+
     if args.dc4_glob:
-        # Use the pattern directly (e.g. '/path/to/lztmre_p104r072_*_dc4mz.img')
         dc4_files = sorted(glob.glob(args.dc4_glob))
     else:
-        # Build a standard path to where dc4 images live for this scene.
-        # We use a dummy filename to find the folder, then glob inside it.
-        base = Path(stdProjFilename(f"lztmre_{scene}_00000000_dc4mz.img")).parent
-        dc4_files = sorted(glob.glob(str(base / f"lztmre_{scene}_*_dc4mz.img")))
+        base = Path(stdProjFilename(f"lztmre_{scene}_00000000_{dc4_tag}.img")).parent
+        dc4_files = sorted(glob.glob(str(base / f"lztmre_{scene}_*_{dc4_tag}.img")))
+
 
     if not dc4_files:
         raise SystemExit("No dc4 images found")
@@ -1105,7 +1112,8 @@ def main(argv=None) -> int:
     # in the output naming for consistency with SR variants.
     base_dir = Path(start_db8).parent
 
-    out_base = f"lztmre_{scene}_{era}_vi-fpc"
+    out_base = f"lztmre_{scene}_{era}_vi-{dc4_tag}"
+
     out_cls = stdProjFilename(str(base_dir / f"{out_base}_dllmz.img"))
     out_int = stdProjFilename(str(base_dir / f"{out_base}_dljmz.img"))
 

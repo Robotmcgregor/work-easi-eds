@@ -306,11 +306,13 @@ def _write_fc(
     fc_file: str,
     out_scene_dir: Path,
     *,
+    dc4_tag: str = "dc4mz",
     convert_to_fpc: bool = False,
     k: float = 0.000435,
     n: float = 1.909,
     fc_nodata: Optional[float] = None,
 ) -> str:
+
     """
     Read a single-band Fractional Cover (FC) image and write a
     SLATS-compatible dc4 image for this date.
@@ -342,7 +344,9 @@ def _write_fc(
     proj = ds.GetProjection()
 
     # Build the output filename and ensure the scene directory exists
-    out_name = f"lztmre_{scene}_{date_tag}_dc4mz.img"
+    # out_name = f"lztmre_{scene}_{date_tag}_dc4mz.img"
+    out_name = f"lztmre_{scene}_{date_tag}_{dc4_tag}.img"
+
     out_path = out_scene_dir / out_name
     _ensure_dir(out_scene_dir)
 
@@ -512,6 +516,14 @@ def main(argv=None) -> int:
         default=None,
         help="Override nodata value for FC input; defaults to band nodata if present",
     )
+
+    ap.add_argument(
+    "--dc4-tag",
+    default="dc4mz",
+    help="Suffix tag for dc4 outputs (e.g. dc4mz, dc4fc, dc4fpc, dc4ndvi). Default: dc4mz",
+    )
+
+
 
     args = ap.parse_args(argv)
 
@@ -758,11 +770,13 @@ def main(argv=None) -> int:
                     scene,
                     fc_file,
                     out_scene_dir,
+                    dc4_tag=args.dc4_tag,
                     convert_to_fpc=args.fc_convert_to_fpc,
                     k=args.fc_k,
                     n=args.fc_n,
                     fc_nodata=args.fc_nodata,
                 )
+
                 print(out_dc4)
             except Exception as e:
                 print(f"[ERR] dc4 build failed for {fc_file}: {e}")
@@ -775,7 +789,9 @@ def main(argv=None) -> int:
         sample_template = built_db8[0]
     else:
         # Try any dc4 in the scene dir
-        dc4_candidates = list(out_scene_dir.glob("*_dc4mz.img"))
+        # dc4_candidates = list(out_scene_dir.glob("*_dc4mz.img"))
+        dc4_candidates = list(out_scene_dir.glob(f"*_{args.dc4_tag}.img"))
+
         if dc4_candidates:
             sample_template = str(dc4_candidates[0])
 
