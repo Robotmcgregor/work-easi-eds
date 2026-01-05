@@ -69,16 +69,6 @@ except Exception:
 #         raise ValueError(f"Cannot parse date from {path}")
 #     return m.group(0)
 
-def _safe_log1p(x: np.ndarray) -> np.ndarray:
-    """
-    Safe log1p for FC/SR style arrays:
-    - treats non-finite values as 0
-    - clamps values < 0 to 0 (prevents log1p of -1 or less producing NaNs)
-    """
-    x = np.where(np.isfinite(x), x, 0.0)
-    x = np.clip(x, 0.0, None)
-    return np.log1p(x)
-
 
 def parse_date(path: str) -> str:
     """
@@ -625,6 +615,252 @@ def stretch(
     return stretched.astype(np.uint8)
 
 
+# def main(argv=None) -> int:
+#     ap = argparse.ArgumentParser(description="Legacy-method change detection (seasonal window)")
+#     ap.add_argument('--scene', required=True)
+#     ap.add_argument('--start-date', required=True)
+#     ap.add_argument('--end-date', required=True)
+#     ap.add_argument('--dc4-glob', help='Glob for dc4 images; defaults to compat path')
+#     ap.add_argument('--start-db8')
+#     ap.add_argument('--end-db8')
+#     ap.add_argument('--window-start')
+#     ap.add_argument('--window-end')
+#     ap.add_argument('--lookback', type=int, default=10)
+#     ap.add_argument('--omit-fpc-start-threshold', action='store_true')
+#     ap.add_argument('--verbose', action='store_true')
+#     args = ap.parse_args(argv)
+
+#     scene = args.scene.lower()
+#     sd = args.start_date
+#     ed = args.end_date
+#     ws = args.window_start or sd[4:]
+#     we = args.window_end or ed[4:]
+
+#     # Discover inputs
+#     # If explicit start/end db8 stacks are not supplied, derive their standard filenames.
+#     if args.start_db8 and args.end_db8:
+#         start_db8 = args.start_db8
+#         end_db8 = args.end_db8
+#     else:
+#         start_db8 = stdProjFilename(f"lztmre_{scene}_{sd}_db8mz.img")
+#         end_db8 = stdProjFilename(f"lztmre_{scene}_{ed}_db8mz.img")
+#     if not os.path.exists(start_db8) or not os.path.exists(end_db8):
+#         raise SystemExit("Start/end db8 files not found; provide --start-db8/--end-db8 or build them.")
+
+#     # dc4 sources: prefer explicit glob passed by the master; otherwise use scene-based directory.
+#     if args.dc4_glob:
+#         dc4_files = sorted(glob.glob(args.dc4_glob))
+#     else:
+#         base = Path(stdProjFilename(f"lztmre_{scene}_00000000_dc4mz.img")).parent
+#         dc4_files = sorted(glob.glob(str(base / f"lztmre_{scene}_*_dc4mz.img")))
+#     if not dc4_files:
+#         raise SystemExit("No dc4 images found")
+
+#     # Load reflectance
+#     ref_start, georef = load_raster(start_db8)
+#     ref_end, _ = load_raster(end_db8)
+
+#     # Load dc4 and crop all arrays to a common shape (minimal Y,X across all inputs).
+#     # This safeguards against slight dimension/transform mismatches in inputs.
+#     raw_dc4 = []
+#     dates = []
+#     for p in dc4_files:
+#         arr, _ = load_raster(p)
+#         if arr.shape[0] != 1:
+#             raise SystemExit(f"dc4 must be single band: {p}")
+#         raw_dc4.append(arr[0])
+#         dates.append(parse_date(p))
+#     # Determine minimal common shape across start/end reflectance and all dc4 rasters
+#     ys = []; xs = []
+#     for a in [ref_start, ref_end] + raw_dc4:
+#         if a.ndim == 3:
+#             _, y, x = a.shape
+#         else:
+#             y, x = a.shape
+#         ys.append(y); xs.append(x)
+#     min_y = min(ys); min_x = min(xs)
+#     def crop(a):
+#         if a.ndim == 3:
+#             return a[..., :min_y, :min_x]
+#         return a[:min_y, :min_x]
+#     ref_start = crop(ref_start).astype(np.float32)
+#     ref_end = crop(ref_end).astype(np.float32)
+#     raw_dc4 = [crop(a) for a in raw_dc4]
+
+#     # Build seasonal baseline: choose at most one dc4 image per prior year within the window, up to lookback.
+#     # Constraint: pick dates <= provided start-date. We choose the date closest (by MMDD) to the end target within each year.
+#     end_year = int(ed[:4])
+#     start_cutoff = sd
+#     # group dates by year
+#     by_year = {}
+#     for d, a in zip(dates, raw_dc4):
+#         y = int(d[:4])
+#         if y < end_year - args.lookback + 1 or y > end_year:
+#             continue
+#         if d > start_cutoff:
+#             continue
+#         if not in_window(d, ws, we):
+#             continue
+#         by_year.setdefault(y, []).append((d, a))
+#     # choose nearest to end MMDD within window
+#     tm, td = int(we[:2]), int(we[2:])
+#     def md_dist(d: str) -> int:
+#         return abs((int(d[4:6]) - tm) * 31 + (int(d[6:8]) - td))
+#     base_dates: List[str] = []
+#     base_raw: List[np.ndarray] = []
+#     for y in sorted(by_year.keys()):
+#         lst = by_year[y]
+#         if lst:
+#             d, a = sorted(lst, key=lambda t: md_dist(t[0]))[0]
+#             base_dates.append(d)
+#             base_raw.append(a)
+#     if len(base_dates) < 2:
+#         # Fallback: use all available dc4 prior to start within the window (not limited to 1 per year)
+#         base_dates = [d for d in dates if (d <= start_cutoff and in_window(d, ws, we))]
+#         base_raw = [a for d, a in zip(dates, raw_dc4) if (d <= start_cutoff and in_window(d, ws, we))]
+#         if len(base_dates) < 2:
+#             raise SystemExit("Baseline too small (<2 images) after seasonal filtering")
+
+#     # Normalise baseline
+#     base_norm = [normalise_fpc(a) for a in base_raw]
+#     ts_mean, ts_std, ts_stderr, ts_slope, ts_intercept = timeseries_stats(base_norm, base_dates)
+
+#     # Choose FPC start/end closest to provided dates (constrained to seasonal window).
+#     # If exact dates are present they are used; otherwise nearest-in-days inside the window.
+#     def nearest_idx(target: str, pool_dates: List[str]) -> int:
+#         if target in pool_dates:
+#             return pool_dates.index(target)
+#         best = None
+#         for i, d in enumerate(pool_dates):
+#             if not in_window(d, ws, we):
+#                 continue
+#             import datetime
+#             def to_date(s):
+#                 return datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+#             dist = abs((to_date(d) - to_date(target)).days)
+#             if best is None or dist < best[0]:
+#                 best = (dist, i)
+#         return best[1] if best else 0
+#     idx_start = nearest_idx(sd, dates)
+#     idx_end = nearest_idx(ed, dates)
+#     fpc_start_raw = raw_dc4[idx_start]
+#     fpc_end_raw = raw_dc4[idx_end]
+#     fpc_start_norm = normalise_fpc(fpc_start_raw)
+#     fpc_end_norm = normalise_fpc(fpc_end_raw)
+
+#     # Legacy indices and tests
+#     # fpcDiff is based on normalised FPC; its product with stderr (negated) follows the legacy sign convention.
+#     fpcDiff = fpc_end_norm.astype(np.float32) - fpc_start_norm.astype(np.float32)
+#     fpcDiffStdErr = -fpcDiff * ts_stderr
+#     prediction_decimal_year = decimal_year(ed)
+#     predictedNormedFpc = ts_intercept + ts_slope * prediction_decimal_year
+#     observedNormedFpc = fpc_end_norm.astype(np.float32)
+#     sTest = np.zeros_like(observedNormedFpc, dtype=np.float32)
+#     tTest = np.zeros_like(observedNormedFpc, dtype=np.float32)
+#     valid_stderr = ts_stderr >= 0.2
+#     valid_std = ts_std >= 0.2
+#     sTest[valid_stderr] = (observedNormedFpc[valid_stderr] - predictedNormedFpc[valid_stderr]) / ts_stderr[valid_stderr]
+#     tTest[valid_std] = (observedNormedFpc[valid_std] - ts_mean[valid_std]) / ts_std[valid_std]
+
+#     # Spectral index from start/end DB8: bands 2,3,5,6 are indices [1,2,4,5] in the db8 stack.
+#     # The weights and log1p() transform follow the legacy model.
+#     refStart = ref_start
+#     refEnd = ref_end
+#     spectralIndex = (
+#         (0.77801094 * np.log1p(refStart[1])) +
+#         (1.7713253  * np.log1p(refStart[2])) +
+#         (2.0714311  * np.log1p(refStart[4])) +
+#         (2.5403550  * np.log1p(refStart[5])) +
+#         (-0.2996241 * np.log1p(refEnd[1])) +
+#         (-0.5447928 * np.log1p(refEnd[2])) +
+#         (-2.2842536 * np.log1p(refEnd[4])) +
+#         (-4.0177752 * np.log1p(refEnd[5]))
+#     ).astype(np.float32)
+
+#     combinedIndex = (-11.972499 * spectralIndex -
+#                      0.40357223 * fpcDiff -
+#                      5.2609715  * tTest -
+#                      4.3794265  * sTest).astype(np.float32)
+
+#     # Change class assignment according to legacy thresholds.
+#     # 10 = no clearing (default), 3 = FPC-only signal, 34..39 = increasing clearing confidence/strength.
+#     NO_CLEARING = 10
+#     NULL_CLEARING = 0
+#     changeclass = np.full(spectralIndex.shape, NO_CLEARING, dtype=np.uint8)
+#     changeclass[combinedIndex > 21.80] = 34
+#     changeclass[(combinedIndex > 27.71) & (sTest < -0.27) & (spectralIndex < -0.86)] = 35
+#     changeclass[(combinedIndex > 33.40) & (sTest < -0.60) & (spectralIndex < -1.19)] = 36
+#     changeclass[(combinedIndex > 39.54) & (sTest < -1.01) & (spectralIndex < -1.50)] = 37
+#     changeclass[(combinedIndex > 47.05) & (sTest < -1.55) & (spectralIndex < -1.84)] = 38
+#     changeclass[(combinedIndex > 58.10) & (sTest < -2.34) & (spectralIndex < -2.27)] = 39
+#     changeclass[(tTest > -1.70) & (fpcDiffStdErr > 740)] = 3
+
+#     # Optional rule: force no-clearing where raw fpcStart < 108 (applies before nulling by reflectance zeros).
+#     if not args.omit_fpc_start_threshold:
+#         changeclass[fpc_start_raw < 108] = NO_CLEARING
+
+#     # Null out where reflectance has zeros in any band for start or end.
+#     refNullMask = (refStart == 0).any(axis=0) | (refEnd == 0).any(axis=0)
+#     changeclass[refNullMask] = NULL_CLEARING
+
+#     # Interpretation stretch (legacy scales) and clearing probability.
+#     spectralMean = float(np.mean(spectralIndex[spectralIndex != 0])) if np.any(spectralIndex != 0) else 0.0
+#     spectralStd  = float(np.std(spectralIndex[spectralIndex != 0])) if np.any(spectralIndex != 0) else 1.0
+#     sTestMean    = float(np.mean(sTest[sTest != 0])) if np.any(sTest != 0) else 0.0
+#     sTestStd     = float(np.std(sTest[sTest != 0])) if np.any(sTest != 0) else 1.0
+#     combMean     = float(np.mean(combinedIndex[combinedIndex != 0])) if np.any(combinedIndex != 0) else 0.0
+#     combStd      = float(np.std(combinedIndex[combinedIndex != 0])) if np.any(combinedIndex != 0) else 1.0
+
+#     print(f"[EDS DEBUG] - spectralMean {spectralMean}")
+#     print(f"[EDS DEBUG] - spectralStd {spectralStd}")
+#     print(f"[EDS DEBUG] - sTestMean {sTestMean}")
+#     print(f"[EDS DEBUG] - sTestStd {sTestStd}")
+#     print(f"[EDS DEBUG] - combMean {combMean}")
+#     print(f"[EDS DEBUG] - combStd {combStd}")
+
+#     spectralStretched = stretch(spectralIndex, spectralMean, spectralStd, 2, 1, 255, 0)
+#     sTestStretched     = stretch(sTest, sTestMean, sTestStd, 10, 1, 255, 0)
+#     combinedStretched  = stretch(combinedIndex, combMean, combStd, 10, 1, 255, 0)
+
+#     clearingProb = 200 * (1 - np.exp(-((0.01227 * combinedIndex) ** 3.18975)))
+#     clearingProb = np.round(clearingProb).astype(np.uint8)
+#     clearingProb[combinedIndex <= 0] = 0
+
+#     # Outputs (ENVI .img with legacy-compatible names)
+#     # era = f"d{sd}{ed}"
+#     # out_cls = stdProjFilename(f"lztmre_{scene}_{era}_dllmz.img")
+#     # out_int = stdProjFilename(f"lztmre_{scene}_{era}_dljmz.img")
+#     # Path(out_cls).parent.mkdir(parents=True, exist_ok=True)
+
+#     # write_envi(out_cls, [changeclass], georef, dtype=gdal.GDT_Byte, nodata=0)
+#     # write_envi(out_int, [spectralStretched, sTestStretched, combinedStretched, clearingProb], georef, dtype=gdal.GDT_Byte, nodata=0)
+#     # Outputs (ENVI .img with legacy-compatible names)
+#     era = f"d{sd}{ed}"
+#     # Put outputs in the same folder as the start db8 (i.e. the compat scene folder)
+#     base_dir = Path(start_db8).parent
+
+#     out_cls = stdProjFilename(str(base_dir / f"lztmre_{scene}_{era}_dllmz.img"))
+#     out_int = stdProjFilename(str(base_dir / f"lztmre_{scene}_{era}_dljmz.img"))
+#     Path(out_cls).parent.mkdir(parents=True, exist_ok=True)
+
+#     write_envi(out_cls, [changeclass], georef, dtype=gdal.GDT_Byte, nodata=0)
+#     write_envi(out_int, [spectralStretched, sTestStretched, combinedStretched, clearingProb],
+#                georef, dtype=gdal.GDT_Byte, nodata=0)
+
+#     if args.verbose:
+#         print(f"Baseline dates ({len(base_dates)}): {','.join(base_dates)}")
+#         print(f"Wrote: {out_cls}")
+#         print(f"Wrote: {out_int}")
+#     else:
+#         print(out_cls)
+#         print(out_int)
+#     return 0
+
+
+# if __name__ == '__main__':
+#     raise SystemExit(main())
+
+
 def main(argv=None) -> int:
     """
     Run the legacy EDS-style change detection for one scene and one
@@ -955,44 +1191,16 @@ def main(argv=None) -> int:
     refStart = ref_start
     refEnd = ref_end
 
-    # spectralIndex = (
-    #     (0.77801094 * np.log1p(refStart[1]))
-    #     + (1.7713253 * np.log1p(refStart[2]))
-    #     + (2.0714311 * np.log1p(refStart[4]))
-    #     + (2.5403550 * np.log1p(refStart[5]))
-    #     + (-0.2996241 * np.log1p(refEnd[1]))
-    #     + (-0.5447928 * np.log1p(refEnd[2]))
-    #     + (-2.2842536 * np.log1p(refEnd[4]))
-    #     + (-4.0177752 * np.log1p(refEnd[5]))
-    # ).astype(np.float32)
-
-
     spectralIndex = (
-        (0.77801094 * _safe_log1p(refStart[1]))
-        + (1.7713253 * _safe_log1p(refStart[2]))
-        + (2.0714311 * _safe_log1p(refStart[4]))
-        + (2.5403550 * _safe_log1p(refStart[5]))
-        + (-0.2996241 * _safe_log1p(refEnd[1]))
-        + (-0.5447928 * _safe_log1p(refEnd[2]))
-        + (-2.2842536 * _safe_log1p(refEnd[4]))
-        + (-4.0177752 * _safe_log1p(refEnd[5]))
+        (0.77801094 * np.log1p(refStart[1]))
+        + (1.7713253 * np.log1p(refStart[2]))
+        + (2.0714311 * np.log1p(refStart[4]))
+        + (2.5403550 * np.log1p(refStart[5]))
+        + (-0.2996241 * np.log1p(refEnd[1]))
+        + (-0.5447928 * np.log1p(refEnd[2]))
+        + (-2.2842536 * np.log1p(refEnd[4]))
+        + (-4.0177752 * np.log1p(refEnd[5]))
     ).astype(np.float32)
-
-
-    # DEBUG: how much invalid/negative reflectance are we seeing?
-    neg_start = np.sum(refStart[[1,2,4,5]] < 0)
-    neg_end   = np.sum(refEnd[[1,2,4,5]] < 0)
-    print(f"[EDS DEBUG] negative reflectance pixels (start): {neg_start}")
-    print(f"[EDS DEBUG] negative reflectance pixels (end):   {neg_end}")
-
-    spectralIndex = np.nan_to_num(spectralIndex, nan=0.0, posinf=0.0, neginf=0.0)
-
-    print("[EDS DEBUG] spectralIndex stats:",
-      "min", float(np.nanmin(spectralIndex)),
-      "max", float(np.nanmax(spectralIndex)),
-      "mean", float(np.nanmean(spectralIndex)))
-
-
 
     # Combined index that mixes spectral change, FPC change, and the tests.
     combinedIndex = (
@@ -1099,15 +1307,13 @@ def main(argv=None) -> int:
     # ---------------------------------------------
     # era string encodes the start and end dates.
     era = f"d{sd}{ed}"
-    
+
     # Put outputs in the same folder as the start db8 (i.e. the compat
-    # scene folder). Include the tile (scene) and the process used (fpc)
-    # in the output naming for consistency with SR variants.
+    # scene folder).
     base_dir = Path(start_db8).parent
 
-    out_base = f"lztmre_{scene}_{era}_vi-fpc"
-    out_cls = stdProjFilename(str(base_dir / f"{out_base}_dllmz.img"))
-    out_int = stdProjFilename(str(base_dir / f"{out_base}_dljmz.img"))
+    out_cls = stdProjFilename(str(base_dir / f"lztmre_{scene}_{era}_dllmz.img"))
+    out_int = stdProjFilename(str(base_dir / f"lztmre_{scene}_{era}_dljmz.img"))
 
     # Make sure the folder exists.
     Path(out_cls).parent.mkdir(parents=True, exist_ok=True)
@@ -1124,34 +1330,6 @@ def main(argv=None) -> int:
         dtype=gdal.GDT_Byte,
         nodata=0,
     )
-
-    # Lightweight JSON provenance log for consistency with SR variants
-    try:
-        import json
-        log = {
-            "scene": scene,
-            "start_date": sd,
-            "end_date": ed,
-            "process": "vi-fpc",
-            "window_start": ws,
-            "window_end": we,
-            "lookback_years": args.lookback,
-            "baseline_dates": base_dates,
-            "selected_start_date": dates[idx_start],
-            "selected_end_date": dates[idx_end],
-            "omit_fpc_start_threshold": bool(args.omit_fpc_start_threshold),
-            "outputs": {
-                "dll": out_cls,
-                "dlj": out_int
-            }
-        }
-        log_path = os.path.splitext(out_cls)[0] + "_log.json"
-        with open(log_path, "w", encoding="utf-8") as f:
-            json.dump(log, f, indent=2)
-        if args.verbose:
-            print(f"Wrote: {log_path}")
-    except Exception as e:
-        print(f"[WARN] Failed to write log JSON: {e}")
 
     # ---------------------------------------------
     # 13. Friendly console output

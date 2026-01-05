@@ -222,10 +222,12 @@ def load_sr_and_fmask_for_day(
             longitude=lon_range,
             time=(t0, t1),
             group_by="solar_day",
-            output_crs=target_utm_epsg,  # auto-picked UTM zone
-            resolution=(-30, 30),        # e.g. 30 m UTM
+            # IMPORTANT: stay in native CRS (Albers) to avoid huge reprojection cost
+            output_crs=target_utm_epsg,
+            resolution=(-30, 30),
             skip_broken_datasets=True,
         )
+
 
         print(f"[DEBUG] Loaded SR+FMASK dataset for {product}, date={date_str}")
         _describe_ds_crs_and_dims(ds, label=f"SR+FMASK ({product})")
@@ -266,10 +268,12 @@ def load_fc_for_day(
             longitude=lon_range,
             time=(t0, t1),
             group_by="solar_day",
-            output_crs=target_utm_epsg,  # auto-picked UTM zone
-            resolution=(-30, 30),        # e.g. 30 m UTM
+            # IMPORTANT: stay in native CRS (Albers)
+            output_crs=target_utm_epsg,
+            resolution=(-30, 30),
             skip_broken_datasets=True,
         )
+
 
         print(f"[DEBUG] Loaded FC dataset for date={date_str}")
         _describe_ds_crs_and_dims(ds, label="FC (ga_ls_fc_3)")
@@ -293,9 +297,12 @@ def composite_time_mean(ds: xr.Dataset, band_names: Iterable[str]) -> xr.Dataset
     If there is no 'time' dimension (only one time slice), we just drop it.
     """
     print(f"[DEBUG] composite_time_mean on bands={list(band_names)}; ds.dims={ds.dims}")
+    print(f"[DEBUG] failes here server error")
     subset = ds[band_names]
+    print(f"[DEBUG] subset: {subset}")
     if "time" in subset.dims:
         out = subset.mean("time", keep_attrs=True)
+        print("out: ", out)
         print("[DEBUG] composite_time_mean: time dimension found → mean over time.")
         return out
     print("[DEBUG] composite_time_mean: no time dimension → returning subset unchanged.")

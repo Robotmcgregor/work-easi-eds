@@ -47,14 +47,41 @@ python manage.py collectstatic --noinput
 
 ### 4. Start Server
 ```bash
+
+cd ~/work-easi-eds/django_project
+
+source venv/bin/activate
+
+
+which python
+python --version
+
+
+export DJANGO_SETTINGS_MODULE=eds_easi.settings.staging
+
+
+python manage.py shell -c "from django.conf import settings; print('catalog' in settings.INSTALLED_APPS); print(settings.DATABASES['default']['NAME'])"
+
+# Expected:
+# True
+# /home/jovyan/work-easi-eds/data/eds_database.db
+
+mkdir -p /home/jovyan/work-easi-eds/data
+
+#Bootstrap legacy schema + tiles (ONE-TIME per fresh EASI)
+python manage.py eds_bootstrap_sqlite \
+  --tiles-shp /home/jovyan/assets/eds_lsat_grid_min_max.shp
+
+
 # Development (testing)
-python manage.py runserver 0.0.0.0:8000
+python manage.py runserver 0.0.0.0:8001
 
 # Production (use Gunicorn)
 gunicorn --workers 4 --bind 127.0.0.1:8000 eds_easi.wsgi:application
 ```
 
 ### 5. Access Dashboard
+- **Main Dashboard**: https://hub.dcceew.easi-eo.solutions/user/robotmcgregor/proxy/8001/
 - **Main Dashboard**: http://your-easi-server:8000/
 - **Admin Panel**: http://your-easi-server:8000/admin/
 - **QC Validations**: http://your-easi-server:8000/qc/validations/

@@ -181,83 +181,6 @@ def _stack_sr(
     del ds0
     return str(out_path)
 
-def _compute_ndvi_from_sr_composite(
-    sr_composite_file: str,
-    nodata: Optional[float] = None,
-) -> np.ndarray:
-    """
-    Compute NDVI directly from an SR *composite* (nbart6m/srb) without requiring db8 output.
-    Assumes band order matches Landsat SR stack: B2,B3,B4,B5,... so:
-      RED = band 3 (B4)
-      NIR = band 4 (B5)
-    """
-    ds = gdal.Open(sr_composite_file, gdal.GA_ReadOnly)
-    if ds is None:
-        raise RuntimeError(f"Cannot open SR composite: {sr_composite_file}")
-    if ds.RasterCount < 4:
-        raise RuntimeError(f"SR composite must have >= 4 bands; got {ds.RasterCount}")
-
-    red_band = ds.GetRasterBand(3)
-    nir_band = ds.GetRasterBand(4)
-
-    red = red_band.ReadAsArray().astype(np.float32)
-    nir = nir_band.ReadAsArray().astype(np.float32)
-
-    nodata_val = nodata if nodata is not None else red_band.GetNoDataValue()
-
-    denom = nir + red
-    valid = (denom != 0.0)
-    if nodata_val is not None:
-        valid = valid & (red != nodata_val) & (nir != nodata_val)
-
-    ndvi = np.zeros_like(red, dtype=np.float32)
-    ndvi[valid] = (nir[valid] - red[valid]) / denom[valid]
-
-    ndvi_scaled = np.clip(100.0 + 100.0 * ndvi, 0.0, 200.0)
-    ndvi_uint8 = np.round(ndvi_scaled).astype(np.uint8)
-    ndvi_uint8[~valid] = 0
-
-    ds = None
-    return ndvi_uint8
-
-
-def _write_ndvi_dc4_from_composite(
-    date_tag: str,
-    scene: str,
-    sr_composite_file: str,
-    out_scene_dir: Path,
-) -> str:
-    ds = gdal.Open(sr_composite_file, gdal.GA_ReadOnly)
-    if ds is None:
-        raise RuntimeError(f"Cannot open SR composite: {sr_composite_file}")
-
-    xsize, ysize = ds.RasterXSize, ds.RasterYSize
-    geotrans = ds.GetGeoTransform(can_return_null=True)
-    proj = ds.GetProjection()
-    ds = None
-
-    ndvi_data = _compute_ndvi_from_sr_composite(sr_composite_file)
-
-    out_name = f"lztmre_{scene}_{date_tag}_dc4mz.img"
-    out_path = out_scene_dir / out_name
-    _ensure_dir(out_scene_dir)
-
-    drv = gdal.GetDriverByName("ENVI")
-    out = drv.Create(str(out_path), xsize, ysize, 1, gdal.GDT_Byte)
-
-    if geotrans:
-        out.SetGeoTransform(geotrans)
-    if proj:
-        out.SetProjection(proj)
-
-    b = out.GetRasterBand(1)
-    b.WriteArray(ndvi_data)
-    b.SetNoDataValue(0)
-    out.FlushCache()
-    del out
-
-    return str(out_path)
-
 
 def _compute_ndvi_from_sr(
     sr_file: str,
@@ -434,7 +357,6 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Build SLATS-compatible db8/dc4 files from GA/EASI SR with NDVI timeseries"
     )
-
     ap.add_argument(
         "--tile",
         required=True,
@@ -461,20 +383,7 @@ def main(argv=None) -> int:
         ),
     )
 
-    # New mode flags (MUST be separate add_argument calls)
-    ap.add_argument(
-        "--db8-only",
-        action="store_true",
-        help="Build db8 only; skip NDVI dc4",
-    )
-    ap.add_argument(
-        "--dc4-only",
-        action="store_true",
-        help="Build NDVI dc4 only; require db8 exists already",
-    )
-
     args = ap.parse_args(argv)
-
 
     if not args.sr_dir or len(args.sr_dir) < 1:
         raise SystemExit("Provide at least one --sr-dir (start/end, etc.)")
@@ -493,14 +402,16 @@ def main(argv=None) -> int:
     # ------------------------------------------------------------------
     built_db8: List[str] = []
     built_dc4: List[str] = []
-
+    
     for d_tag, ddir in zip(args.sr_date, args.sr_dir):
         bands: Dict[str, str] = {}
 
         # Case 1: direct composite file (EASI nbart or legacy srb)
         if os.path.isfile(ddir):
             fname = os.path.basename(ddir).lower()
-            if re.search(r"_nbart6m\d+(_clr)?\.tif$", fname) or re.search(r"_srb[67]\.tif$", fname):
+            if re.search(r"_nbart6m\d+(_clr)?\.tif$", fname) or re.search(
+                r"_srb[67]\.tif$", fname
+            ):
                 bands["COMPOSITE"] = ddir
             else:
                 # Treat as pattern / single-band style; try to find B2..B7 from here
@@ -529,7 +440,6 @@ def main(argv=None) -> int:
                         bands[b] = _find_band_file(ddir, b)
                     except Exception:
                         pass
-
         else:
             # Treat as pattern/glob
             for b in ["B2", "B3", "B4", "B5", "B6", "B7"]:
@@ -538,58 +448,23 @@ def main(argv=None) -> int:
                 except Exception:
                     pass
 
-        # -----------------------------
-        # Mode handling (MUST be in loop)
-        # -----------------------------
-
-        # Safety: don't allow conflicting mode flags
-        if args.db8_only and args.dc4_only:
-            raise SystemExit("Choose only one of --db8-only or --dc4-only (not both).")
-
-        composite = bands.get("COMPOSITE")
-
-        # Expected db8 output path (used for naming)
-        out_db8 = str(out_scene_dir / f"lztmre_{scene}_{d_tag}_db8mz.img")
-
-        if args.dc4_only:
-            # dc4-only: build dc4 directly from SR composite (NO db8)
-            if not composite:
-                raise SystemExit(
-                    f"--dc4-only requires a composite SR file (nbart6m/srb). "
-                    f"Could not resolve COMPOSITE from input: {ddir}"
-                )
-
-            out_dc4 = _write_ndvi_dc4_from_composite(d_tag, scene, composite, out_scene_dir)
-            print(f"Built dc4 (NDVI): {out_dc4}")
-            built_dc4.append(out_dc4)
-            continue
-
-        # Normal path: build db8
+        # Build db8 from SR
         out_db8 = _stack_sr(d_tag, scene, bands, out_scene_dir)
         print(f"Built db8: {out_db8}")
         built_db8.append(out_db8)
-
-        if args.db8_only:
-            # db8-only: stop here
-            continue
-
-        # Default: build dc4 from db8
+        
+        # Build dc4 from NDVI computed from SR
         out_dc4 = _write_ndvi_dc4(d_tag, scene, out_db8, out_scene_dir)
         print(f"Built dc4 (NDVI): {out_dc4}")
         built_dc4.append(out_dc4)
 
-    # -----------------------------
-    # After loop: footprint + summary
-    # -----------------------------
-
-    # Ensure footprint (works for db8-only; optional for dc4-only)
+    # Ensure footprint
     if built_db8:
         fp = _ensure_footprint(scene, built_db8[0], out_scene_dir)
         print(f"Footprint: {fp}")
 
     print(f"\n[OK] Built {len(built_db8)} db8 and {len(built_dc4)} NDVI dc4 files.")
     return 0
-
 
 
 if __name__ == "__main__":
