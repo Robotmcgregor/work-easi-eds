@@ -141,11 +141,40 @@ def _stack_sr(
         if proj:
             out.SetProjection(proj)
 
+        # for i in range(1, n_bands + 1):
+        #     in_band = ds.GetRasterBand(i)
+        #     out_band = out.GetRasterBand(i)
+        #     out_band.WriteArray(in_band.ReadAsArray())
+
         for i in range(1, n_bands + 1):
             in_band = ds.GetRasterBand(i)
-            out_band = out.GetRasterBand(i)
-            out_band.WriteArray(in_band.ReadAsArray())
+            data = in_band.ReadAsArray()
 
+            src_nd = in_band.GetNoDataValue()
+
+            # DEBUG (band 1 only)
+            if i == 1:
+                print(f"[db8-ndvi] COMPOSITE band {i}")
+                print(f"  src nodata value: {src_nd}")
+                print(f"  min/max before: {data.min()} / {data.max()}")
+                if src_nd is not None:
+                    print(f"  count(src_nd): {(data == src_nd).sum()}")
+                print(f"  count(0) before: {(data == 0).sum()}")
+
+            if src_nd is not None:
+                data = np.where(data == src_nd, 0, data)
+
+            if i == 1:
+                print(f"  min/max after: {data.min()} / {data.max()}")
+                print(f"  count(src_nd) after: {(data == src_nd).sum() if src_nd is not None else 'n/a'}")
+                print(f"  count(0) after: {(data == 0).sum()}")
+
+            out_band = out.GetRasterBand(i)
+            out_band.WriteArray(data)
+            out_band.SetNoDataValue(0)
+
+        # import sys
+        # sys.exit("forced stop [DEBUG] NAN values")
         out.FlushCache()
         del out
         del ds
@@ -203,21 +232,47 @@ def _compute_ndvi_from_sr_composite(
     red = red_band.ReadAsArray().astype(np.float32)
     nir = nir_band.ReadAsArray().astype(np.float32)
 
-    nodata_val = nodata if nodata is not None else red_band.GetNoDataValue()
+    # nodata_val = nodata if nodata is not None else red_band.GetNoDataValue()
+
+    # denom = nir + red
+    # valid = (denom != 0.0)
+    # if nodata_val is not None:
+    #     valid = valid & (red != nodata_val) & (nir != nodata_val)
+
+    # Read nodata independently from each band
+    red_nd = nodata if nodata is not None else red_band.GetNoDataValue()
+    nir_nd = nir_band.GetNoDataValue()
 
     denom = nir + red
+
+    # Start with denominator != 0
     valid = (denom != 0.0)
-    if nodata_val is not None:
-        valid = valid & (red != nodata_val) & (nir != nodata_val)
+
+    # Mask nodata explicitly per band
+    if red_nd is not None:
+        valid &= (red != red_nd)
+
+    if nir_nd is not None:
+        valid &= (nir != nir_nd)
+
 
     ndvi = np.zeros_like(red, dtype=np.float32)
     ndvi[valid] = (nir[valid] - red[valid]) / denom[valid]
+
+
+    print(
+        f"[dc4-ndvi-comp] {sr_composite_file} "
+        f"red_nd={red_band.GetNoDataValue()} "
+        f"valid={valid.sum()}/{valid.size}"
+    )
 
     ndvi_scaled = np.clip(100.0 + 100.0 * ndvi, 0.0, 200.0)
     ndvi_uint8 = np.round(ndvi_scaled).astype(np.uint8)
     ndvi_uint8[~valid] = 0
 
     ds = None
+    # import sys
+    # sys.exit("forced stop [DEBUG] NAN values compute_ndvi_from_sr_composite")
     return ndvi_uint8
 
 
@@ -226,7 +281,10 @@ def _write_ndvi_dc4_from_composite(
     scene: str,
     sr_composite_file: str,
     out_scene_dir: Path,
+    *,
+    dc4_tag: str = "dc4ndvi",
 ) -> str:
+
     ds = gdal.Open(sr_composite_file, gdal.GA_ReadOnly)
     if ds is None:
         raise RuntimeError(f"Cannot open SR composite: {sr_composite_file}")
@@ -238,7 +296,9 @@ def _write_ndvi_dc4_from_composite(
 
     ndvi_data = _compute_ndvi_from_sr_composite(sr_composite_file)
 
-    out_name = f"lztmre_{scene}_{date_tag}_dc4mz.img"
+    # out_name = f"lztmre_{scene}_{date_tag}_dc4mz.img"
+    out_name = f"lztmre_{scene}_{date_tag}_{dc4_tag}.img"
+
     out_path = out_scene_dir / out_name
     _ensure_dir(out_scene_dir)
 
@@ -310,15 +370,26 @@ def _compute_ndvi_from_sr(
     # Compute NDVI
     ndvi = np.zeros_like(red)
     ndvi[valid] = (nir[valid] - red[valid]) / denominator[valid]
+
+
+
     
     # Scale NDVI from [-1, 1] to [0, 200]
-    # Formula: output = 100 + 100 * NDVI
+    # Formula: output = 100 + 100 * NDVI  
+    # Set invalid pixels to 0 (nodata)
     ndvi_scaled = np.clip(100.0 + 100.0 * ndvi, 0.0, 200.0)
     ndvi_uint8 = np.round(ndvi_scaled).astype(np.uint8)
-    
-    # Set invalid pixels to 0 (nodata)
+
     ndvi_uint8[~valid] = 0
-    
+
+    print(
+        f"[dc4-ndvi-db8] {sr_file} "
+        f"nodata={nodata_val} "
+        f"valid={valid.sum()}/{valid.size} "
+        f"zeros={(ndvi_uint8 == 0).sum()} "
+        f"min/max={ndvi_uint8.min()}/{ndvi_uint8.max()}"
+    )
+
     ds = None
     return ndvi_uint8
 
@@ -328,7 +399,10 @@ def _write_ndvi_dc4(
     scene: str,
     sr_file: str,
     out_scene_dir: Path,
+    *,
+    dc4_tag: str = "dc4ndvi",
 ) -> str:
+
     """
     Compute NDVI from an SR db8 file and write a SLATS-compatible dc4 image.
 
@@ -339,6 +413,8 @@ def _write_ndvi_dc4(
     where:
       - <scene> is the tile (e.g. p104r072)
       - <date>  is the YYYYMMDD date tag (e.g. 20200611)
+      dc4: lztmre_<scene>_<date>_<dc4-tag>.img  (default dc4mz)
+
     """
     # Open the SR file to get georeferencing
     ds = gdal.Open(sr_file, gdal.GA_ReadOnly)
@@ -355,7 +431,9 @@ def _write_ndvi_dc4(
     ndvi_data = _compute_ndvi_from_sr(sr_file)
 
     # Build the output filename and ensure the scene directory exists
-    out_name = f"lztmre_{scene}_{date_tag}_dc4mz.img"
+    # out_name = f"lztmre_{scene}_{date_tag}_dc4mz.img"
+    out_name = f"lztmre_{scene}_{date_tag}_{dc4_tag}.img"
+
     out_path = out_scene_dir / out_name
     _ensure_dir(out_scene_dir)
 
@@ -474,7 +552,7 @@ def main(argv=None) -> int:
     )
     ap.add_argument(
     "--dc4-tag",
-    default="dc4mz",
+    default="dc4ndvi",
     help="Suffix tag for dc4 outputs (e.g. dc4mz, dc4ndvi). Default: dc4mz",
     )
 
@@ -565,7 +643,15 @@ def main(argv=None) -> int:
                     f"Could not resolve COMPOSITE from input: {ddir}"
                 )
 
-            out_dc4 = _write_ndvi_dc4_from_composite(d_tag, scene, composite, out_scene_dir)
+            # out_dc4 = _write_ndvi_dc4_from_composite(d_tag, scene, composite, out_scene_dir)
+            out_dc4 = _write_ndvi_dc4_from_composite(
+                d_tag,
+                scene,
+                composite,
+                out_scene_dir,
+                dc4_tag=args.dc4_tag,
+            )
+
             print(f"Built dc4 (NDVI): {out_dc4}")
             built_dc4.append(out_dc4)
             continue
@@ -580,7 +666,15 @@ def main(argv=None) -> int:
             continue
 
         # Default: build dc4 from db8
-        out_dc4 = _write_ndvi_dc4(d_tag, scene, out_db8, out_scene_dir)
+        # out_dc4 = _write_ndvi_dc4(d_tag, scene, out_db8, out_scene_dir)
+        out_dc4 = _write_ndvi_dc4(
+            d_tag,
+            scene,
+            out_db8,
+            out_scene_dir,
+            dc4_tag=args.dc4_tag,
+        )
+
         print(f"Built dc4 (NDVI): {out_dc4}")
         built_dc4.append(out_dc4)
 

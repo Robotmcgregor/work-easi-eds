@@ -136,12 +136,44 @@ def _stack_sr(
         if proj:
             out.SetProjection(proj)
 
+        # for i in range(1, ds0.RasterCount + 1):
+        #     band = ds0.GetRasterBand(i)
+        #     data = band.ReadAsArray()
+        #     out_band = out.GetRasterBand(i)
+        #     out_band.WriteArray(data)
+        #     out_band.SetNoDataValue(0)
+
         for i in range(1, ds0.RasterCount + 1):
             band = ds0.GetRasterBand(i)
             data = band.ReadAsArray()
+
+            src_nd = band.GetNoDataValue()
+
+            # ---- DEBUG (before remap) ----
+            if i == 1:
+                print(f"[db8] COMPOSITE band {i}")
+                print(f"  src nodata value: {src_nd}")
+                print(f"  min/max before: {data.min()} / {data.max()}")
+                if src_nd is not None:
+                    print(f"  count(src_nd): {(data == src_nd).sum()}")
+                print(f"  count(0) before: {(data == 0).sum()}")
+
+            # Remap source nodata → 0
+            if src_nd is not None:
+                data = np.where(data == src_nd, 0, data)
+
+            # ---- DEBUG (after remap) ----
+            if i == 1:
+                print(f"  min/max after: {data.min()} / {data.max()}")
+                print(f"  count(src_nd) after: {(data == src_nd).sum() if src_nd is not None else 'n/a'}")
+                print(f"  count(0) after: {(data == 0).sum()}")
+
             out_band = out.GetRasterBand(i)
             out_band.WriteArray(data)
             out_band.SetNoDataValue(0)
+
+        # import sys
+        # sys.exit("Forced stop debug NAN vales SR")
 
         out.FlushCache()
         del out
@@ -364,6 +396,23 @@ def _write_fc(
     # Read the single band of FC data from the input
     band = ds.GetRasterBand(1)
     data = band.ReadAsArray()
+
+    src_nd = fc_nodata if fc_nodata is not None else band.GetNoDataValue()
+
+    # Remap FC nodata → 0 (critical)
+    if src_nd is not None:
+        data = np.where(data == src_nd, 0, data)
+
+    # ---- DEBUG (optional, keep for one run only) ----
+    print(f"[dc4] {scene} {date_tag}")
+    print(f"  src nodata value: {src_nd}")
+    print(f"  min/max after: {data.min()} / {data.max()}")
+    print(f"  count(0): {(data == 0).sum()}")
+    print(f"  count(-999): {(data == -999).sum()}")
+    print(f"  count(-32768): {(data == -32768).sum()}")
+
+    # import sys
+    # sys.exit("forced stop SR NAN data debug")
 
     # Optionally convert FC -> FPC before writing
     if convert_to_fpc:
