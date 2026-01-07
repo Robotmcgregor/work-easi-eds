@@ -72,6 +72,7 @@ $GDALPY "$PIPE" \
   --out-root "$OUT" \
   --timeseries-source fc \
   --fc-only-clr \
+  --sr-only-clr \
   --python-exe "$GDALPY"
 
 
@@ -1192,10 +1193,8 @@ def main():
 
     def write_manifest(tag: str = ""):
         try:
-            out_root = getattr(args, "out_root", None) or "."
-            os.makedirs(out_root, exist_ok=True)
             out_path = os.path.join(
-                out_root,
+                compat_dir,
                 f"eds_master_results_{args.tile}_{args.timeseries_source}_d{args.start_date}_{args.end_date}.json",
             )
             with open(out_path, "w", encoding="utf-8") as f:
@@ -1254,9 +1253,8 @@ def main():
     # Optional: write the manifest now (handy during debugging when you sys.exit early)
     # Writes into out_root so it’s easy to find alongside products/logs.
     try:
-        os.makedirs(args.out_root, exist_ok=True)
         out_path = os.path.join(
-            args.out_root,
+            compat_dir,
             f"eds_master_results_{args.tile}_{args.timeseries_source}_d{args.start_date}_{args.end_date}.json",
         )
         with open(out_path, "w") as f:
@@ -1476,8 +1474,9 @@ def main():
 
     write_manifest(" (after section 7)")
 
-    import sys
-    sys.exit("forced stop section 7")
+    # import sys
+    # sys.exit("forced stop section 7")
+    #print("Section 7 working..."*50)
 
     # ----------------------------------------------------------------------
     # 8. Step 2: Legacy change detection (DLL / DLJ)
@@ -1498,7 +1497,16 @@ def main():
 
     # Pattern describing where dc4 stack members live
     # (one dc4 image per historical date)
-    dc4_glob = str(compat_dir / f"lztmre_{scene}_*_dc4mz.img")
+    # dc4_glob = str(compat_dir / f"lztmre_{scene}_*_dc4mz.img")
+    dc4_tag = {
+    "fc": "dc4fc",
+    "fpc": "dc4fpc",
+    "ndvi": "dc4ndvi",
+    }.get(args.timeseries_source, "dc4mz")
+
+    dc4_glob = str(compat_dir / f"lztmre_{scene}_*_{dc4_tag}.img")
+    print("dc4_glob : ", dc4_glob )
+
 
     # ----------------------------------------------------------------------
     # Select which legacy script to use based on data source
@@ -1512,6 +1520,16 @@ def main():
     else:
         raise ValueError(f"Unknown timeseries_source: {args.timeseries_source}")
 
+    print("legacy_script: ", legacy_script)
+    dc4_existing = _glob.glob(dc4_glob)
+    if len(dc4_existing) < 2:
+        raise RuntimeError(
+            f"No dc4 baseline files found for legacy step.\n"
+            f"Glob used: {dc4_glob}\n"
+            f"timeseries_source={args.timeseries_source}"
+        )
+    # import sys
+    # sys.exit("forced stop section 8 -half way")
     # ----------------------------------------------------------------------
     # Build the command that runs the legacy method
     # ----------------------------------------------------------------------
