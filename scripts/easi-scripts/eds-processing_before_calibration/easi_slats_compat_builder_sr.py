@@ -136,44 +136,12 @@ def _stack_sr(
         if proj:
             out.SetProjection(proj)
 
-        # for i in range(1, ds0.RasterCount + 1):
-        #     band = ds0.GetRasterBand(i)
-        #     data = band.ReadAsArray()
-        #     out_band = out.GetRasterBand(i)
-        #     out_band.WriteArray(data)
-        #     out_band.SetNoDataValue(0)
-
         for i in range(1, ds0.RasterCount + 1):
             band = ds0.GetRasterBand(i)
             data = band.ReadAsArray()
-
-            src_nd = band.GetNoDataValue()
-
-            # ---- DEBUG (before remap) ----
-            if i == 1:
-                print(f"[db8] COMPOSITE band {i}")
-                print(f"  src nodata value: {src_nd}")
-                print(f"  min/max before: {data.min()} / {data.max()}")
-                if src_nd is not None:
-                    print(f"  count(src_nd): {(data == src_nd).sum()}")
-                print(f"  count(0) before: {(data == 0).sum()}")
-
-            # Remap source nodata → 0
-            if src_nd is not None:
-                data = np.where(data == src_nd, 0, data)
-
-            # ---- DEBUG (after remap) ----
-            if i == 1:
-                print(f"  min/max after: {data.min()} / {data.max()}")
-                print(f"  count(src_nd) after: {(data == src_nd).sum() if src_nd is not None else 'n/a'}")
-                print(f"  count(0) after: {(data == 0).sum()}")
-
             out_band = out.GetRasterBand(i)
             out_band.WriteArray(data)
             out_band.SetNoDataValue(0)
-
-        # import sys
-        # sys.exit("Forced stop debug NAN vales SR")
 
         out.FlushCache()
         del out
@@ -338,13 +306,11 @@ def _write_fc(
     fc_file: str,
     out_scene_dir: Path,
     *,
-    dc4_tag: str = "dc4mz",
     convert_to_fpc: bool = False,
     k: float = 0.000435,
     n: float = 1.909,
     fc_nodata: Optional[float] = None,
 ) -> str:
-
     """
     Read a single-band Fractional Cover (FC) image and write a
     SLATS-compatible dc4 image for this date.
@@ -376,9 +342,7 @@ def _write_fc(
     proj = ds.GetProjection()
 
     # Build the output filename and ensure the scene directory exists
-    # out_name = f"lztmre_{scene}_{date_tag}_dc4mz.img"
-    out_name = f"lztmre_{scene}_{date_tag}_{dc4_tag}.img"
-
+    out_name = f"lztmre_{scene}_{date_tag}_dc4mz.img"
     out_path = out_scene_dir / out_name
     _ensure_dir(out_scene_dir)
 
@@ -394,41 +358,8 @@ def _write_fc(
         out.SetProjection(proj)
 
     # Read the single band of FC data from the input
-    # band = ds.GetRasterBand(2) # Band 2 is PV, Band 1 is bare ground and band 3 is NPV
-    # data = band.ReadAsArray()
-
-    ds = gdal.Open(fc_file)
-    band_count = ds.RasterCount
-
-    if band_count == 1:
-        # EASI FC (PV only)
-        band = ds.GetRasterBand(1)
-
-    elif band_count >= 3:
-        # Legacy FC cube → PV is band 2
-        band = ds.GetRasterBand(2)
-
-    else:
-        raise RuntimeError(f"Unexpected FC band count: {band_count}")
-
+    band = ds.GetRasterBand(1)
     data = band.ReadAsArray()
-    
-    src_nd = fc_nodata if fc_nodata is not None else band.GetNoDataValue()
-
-    # Remap FC nodata → 0 (critical)
-    if src_nd is not None:
-        data = np.where(data == src_nd, 0, data)
-
-    # ---- DEBUG (optional, keep for one run only) ----
-    print(f"[dc4] {scene} {date_tag}")
-    print(f"  src nodata value: {src_nd}")
-    print(f"  min/max after: {data.min()} / {data.max()}")
-    print(f"  count(0): {(data == 0).sum()}")
-    print(f"  count(-999): {(data == -999).sum()}")
-    print(f"  count(-32768): {(data == -32768).sum()}")
-
-    # import sys
-    # sys.exit("forced stop SR NAN data debug")
 
     # Optionally convert FC -> FPC before writing
     if convert_to_fpc:
@@ -582,14 +513,6 @@ def main(argv=None) -> int:
         help="Override nodata value for FC input; defaults to band nodata if present",
     )
 
-    ap.add_argument(
-    "--dc4-tag",
-    default="dc4mz",
-    help="Suffix tag for dc4 outputs (e.g. dc4mz, dc4fc, dc4fpc, dc4ndvi). Default: dc4mz",
-    )
-
-
-
     args = ap.parse_args(argv)
 
     if not args.sr_dir or len(args.sr_dir) < 1:
@@ -609,10 +532,6 @@ def main(argv=None) -> int:
     # ------------------------------------------------------------------
     built_db8: List[str] = []
     for d_tag, ddir in zip(args.sr_date, args.sr_dir):
-        print("DEBUG--"*100)
-        print("args.sr_dir: ", args.sr_dir)
-        # import sys
-        # sys.exit("forced stop")
         bands: Dict[str, str] = {}
 
         # Case 1: direct composite file (EASI nbart or legacy srb)
@@ -659,36 +578,6 @@ def main(argv=None) -> int:
 
         out_db8 = _stack_sr(d_tag, scene, bands, out_scene_dir)
         print(out_db8)
-        print("DEBUG--" * 100)
-        print("out_db8: ", out_db8)
-        # ------------------------------------------------------------------
-        # DEBUG / VALIDATION: verify db8 output band count
-        # ------------------------------------------------------------------
-        ds_chk = gdal.Open(out_db8, gdal.GA_ReadOnly)
-        if ds_chk is None:
-            raise RuntimeError(f"[FATAL] Cannot open out_db8 for band check: {out_db8}")
-
-        band_count = ds_chk.RasterCount
-        xsize, ysize = ds_chk.RasterXSize, ds_chk.RasterYSize
-        del ds_chk
-
-        # Expected db8: typically 6 bands (B2..B7) for SR stacks
-        expected_bands = 6
-
-        print(f"[DEBUG] out_db8 band check: bands={band_count}, size={xsize}x{ysize}")
-        if band_count != expected_bands:
-            raise RuntimeError(
-                f"[FATAL] db8 output has unexpected band count.\n"
-                f"  out_db8: {out_db8}\n"
-                f"  expected bands: {expected_bands}\n"
-                f"  actual bands: {band_count}\n"
-                f"  Hint: This usually means the COMPOSITE chosen isn't the expected SR product "
-                f"(or the input folder/path passed via --sr-dir is wrong)."
-            )
-
-
-        # import sys
-        # sys.exit("forced stop")
         built_db8.append(out_db8)
 
     # # ------------------------------------------------------------------
@@ -869,13 +758,11 @@ def main(argv=None) -> int:
                     scene,
                     fc_file,
                     out_scene_dir,
-                    dc4_tag=args.dc4_tag,
                     convert_to_fpc=args.fc_convert_to_fpc,
                     k=args.fc_k,
                     n=args.fc_n,
                     fc_nodata=args.fc_nodata,
                 )
-
                 print(out_dc4)
             except Exception as e:
                 print(f"[ERR] dc4 build failed for {fc_file}: {e}")
@@ -888,9 +775,7 @@ def main(argv=None) -> int:
         sample_template = built_db8[0]
     else:
         # Try any dc4 in the scene dir
-        # dc4_candidates = list(out_scene_dir.glob("*_dc4mz.img"))
-        dc4_candidates = list(out_scene_dir.glob(f"*_{args.dc4_tag}.img"))
-
+        dc4_candidates = list(out_scene_dir.glob("*_dc4mz.img"))
         if dc4_candidates:
             sample_template = str(dc4_candidates[0])
 

@@ -534,6 +534,47 @@ def main(argv=None) -> int:
 
     # → combined values now span –50 to 700+
 
+    # -----------------------------------------------------
+    # CALIBRATION OF NDVI
+    # -----------------------------------------------------
+
+    NDVI_CLEAR_THR  = 40.0   # p95 >= 40 => CLEAR
+    NDVI_STRONG_THR = 80.0   # p95 >= 80 => STRONG
+
+    valid_px = (
+    (norm_start > 0) &
+    (norm_end > 0) &
+    np.isfinite(combined_index)
+    )
+
+    valid_px &= ~refNullMask
+
+    clear_mask  = valid_px & (combined_index >= NDVI_CLEAR_THR)
+    strong_mask = valid_px & (combined_index >= NDVI_STRONG_THR)
+
+
+    clear_mask_img = diag_dir / f"{out_base}_clear_mask.img"
+    strong_mask_img = diag_dir / f"{out_base}_strong_mask.img"
+
+    write_envi(
+        clear_mask_img,
+        [clear_mask.astype(np.uint8)],
+        georef,
+        dtype=gdal.GDT_Byte,
+        nodata=0,
+    )
+
+    write_envi(
+        strong_mask_img,
+        [strong_mask.astype(np.uint8)],
+        georef,
+        dtype=gdal.GDT_Byte,
+        nodata=0,
+    )
+
+    print("diagnostic masks written to:", diag_dir)
+
+
     # Clearing decision logic — mirror legacy DLL thresholds
     NO_CLEARING = 10
     NULL_CLEARING = 0
@@ -555,7 +596,7 @@ def main(argv=None) -> int:
     dll_class[(t_test > -1.70) & (ndviDiffStdErr > 6.0)] = 3   # you can tune this
 
     # Output filenames (define early so diagnostics can use them)
-    out_base = f"lztmre_{scene}_d{sd}{ed}_{args.vi_tag}"
+    # out_base = f"lztmre_{scene}_d{sd}{ed}_{args.vi_tag}"
     dll_path = stdProjFilename(f"{out_base}_dllmz.img")
     dlj_path = stdProjFilename(f"{out_base}_dljmz.img")
 

@@ -8,6 +8,40 @@ Pipeline master for LS8/9 SR + FC queries driven by a tile grid.
     lat_min, lat_max, lon_min, lon_max
 - Calls ls89_fc_sr_query.py with those bounds + span_years
 - (Optional) Runs a seasonal filter over the resulting comparison_table.csv
+
+
+# qld_nvms_run02/lzolre_p095r082_d2023040220231027_dlwm4
+# With custom parameters
+python /home/jovyan/work-easi-eds/scripts/easi-scripts/eds_lsat_collection/ls89_fc_sr_pipeline.py \
+  --tile-shp /home/jovyan/assets/eds_lsat_grid_min_max.shp \
+  --tile-id p095r082 \
+  --span-years 10 \
+  --run-download \
+  --download-start-date 2023-04-22 \
+  --download-end-date 2024-08-31 \
+  --dry-run
+
+  qld_nvms_run02/lzolre_p095r081_d2023040220231027_dlwm4
+
+  python /home/jovyan/work-easi-eds/scripts/easi-scripts/eds_lsat_collection/ls89_fc_sr_pipeline.py \
+  --tile-shp /home/jovyan/assets/eds_lsat_grid_min_max.shp \
+  --tile-id p095r081 \
+  --span-years 10 \
+  --run-download \
+  --download-start-date 2023-04-02 \
+  --download-end-date 2023-10-27 \
+  --dry-run
+
+    python /home/jovyan/work-easi-eds/scripts/easi-scripts/eds_lsat_collection/ls89_fc_sr_pipeline.py \
+  --tile-shp /home/jovyan/assets/eds_lsat_grid_min_max.shp \
+  --tile-id p090r088 \
+  --span-years 10 \
+  --run-download \
+  --download-start-date 2023-01-08 \
+  --download-end-date 2023-10-15 \
+  --dry-run
+
+  lzolre_p090r088_d2023010820231015_dlwm5
 """
 
 from __future__ import annotations

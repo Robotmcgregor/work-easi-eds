@@ -48,6 +48,10 @@ import boto3
 import datacube
 import xarray as xr
 import math
+import json
+from datetime import datetime, timezone
+from osgeo import gdal
+
 
 # rioxarray is used for GeoTIFF writing
 import rioxarray  # noqa: F401  # needed for .rio accessor
@@ -620,6 +624,28 @@ def process_tile_from_comparison(
         sr_products_today = sorted(day_rows["sr_product"].unique())
         print(f"[DL] SR products this day: {sr_products_today}")
 
+        # ---- provenance for this composite day (from comparison table) ----
+        # comparison csv columns are created by ls89_fc_sr_query.py
+        # (sr_id/sr_cloud_cover etc). :contentReference[oaicite:4]{index=4}
+        provenance = {
+            "TILE_ID": tile_id,
+            "DATE": date_str,
+            "COMPOSITE_METHOD": "time_mean",
+            "FMASK_CLEAR_VALUES": sorted(list(FMASK_CLEAR_VALUES)),  # {1}
+            "SR_PRODUCTS": list(sr_products_today),
+
+            # scene-level provenance
+            "SR_SCENE_IDS": day_rows["sr_id"].dropna().astype(str).unique().tolist(),
+            "FC_SCENE_IDS": day_rows["fc_id"].dropna().astype(str).unique().tolist(),
+
+            # scene cloud cover summaries (from metadata query phase)
+            "SR_CLOUD_COVER_MIN": float(pd.to_numeric(day_rows["sr_cloud_cover"], errors="coerce").min()),
+            "SR_CLOUD_COVER_MAX": float(pd.to_numeric(day_rows["sr_cloud_cover"], errors="coerce").max()),
+            "SR_CLOUD_COVER_MEAN": float(pd.to_numeric(day_rows["sr_cloud_cover"], errors="coerce").mean()),
+        }
+
+
+        # ----------------------
         sr_datasets = []
         for prod in sr_products_today:
             ds_sr = load_sr_and_fmask_for_day(dc, prod, lat_range, lon_range, date_str, target_utm_epsg, crs_suffix)
@@ -668,15 +694,12 @@ def process_tile_from_comparison(
             fc_composite = None
             fc_composite_clr = None
         else:
-            # Unmasked FC composite
             fc_composite = composite_time_mean(ds_fc, FC_BANDS)
-
-            # Masked FC composite (clr)
             fc_masked = apply_fmask(ds_fc[FC_BANDS], fmask, FMASK_CLEAR_VALUES)
             fc_composite_clr = composite_time_mean(fc_masked, FC_BANDS)
 
         # -----------------------------------------------------------------
-        # Dry-run mode: just report what we'd do
+        # Dry-run mode
         # -----------------------------------------------------------------
         if dry_run:
             print("[DL] Dry run – would write:")
@@ -694,18 +717,33 @@ def process_tile_from_comparison(
             continue
 
         # -----------------------------------------------------------------
-        # Write local GeoTIFFs (still in native CRS; no reprojection)
+        # WRITE ffmask FIRST (so finalise_composite can read stats)
+        # -----------------------------------------------------------------
+        print(f"[DL] Writing ffmask to {ffmask_out}")
+        write_geotiff(ffmask, ffmask_out, dtype="uint8", nodata=None)
+
+        # -----------------------------------------------------------------
+        # Write SR
         # -----------------------------------------------------------------
         print(f"[DL] Writing SR (unmasked) composite to {sr_nb_out}")
-        # SR: float32 with nodata = -999
         write_geotiff(sr_composite, sr_nb_out, dtype="float32", nodata=-999.0)
 
         print(f"[DL] Writing SR (masked) composite to {sr_nb_clr_out}")
         write_geotiff(sr_composite_clr, sr_nb_clr_out, dtype="float32", nodata=-999.0)
 
+        sidecar = finalise_composite(
+            out_tif=sr_nb_clr_out,
+            ffmask_tif=ffmask_out,
+            provenance={**provenance, "PRODUCT_KIND": "SR_NBART_CLR"},
+            nodata_value=-999.0,
+        )
+        print(f"[META] Wrote SR clr metadata sidecar: {sidecar}")
+
+        # -----------------------------------------------------------------
+        # Write FC
+        # -----------------------------------------------------------------
         if fc_composite is not None:
             print(f"[DL] Writing FC (unmasked) composite to {fc_nb_out}")
-            # FC: nodata code 255 (consistent with raw product)
             write_geotiff(fc_composite, fc_nb_out, dtype="float32", nodata=255.0)
         else:
             print("[DL] Skipping FC unmasked write (no FC data).")
@@ -713,12 +751,106 @@ def process_tile_from_comparison(
         if fc_composite_clr is not None:
             print(f"[DL] Writing FC (masked) composite to {fc_nb_clr_out}")
             write_geotiff(fc_composite_clr, fc_nb_clr_out, dtype="float32", nodata=255.0)
+
+            sidecar = finalise_composite(
+                out_tif=fc_nb_clr_out,
+                ffmask_tif=ffmask_out,
+                provenance={**provenance, "PRODUCT_KIND": "FC_FCM_CLR"},
+                nodata_value=255.0,
+            )
+            print(f"[META] Wrote FC clr metadata sidecar: {sidecar}")
         else:
             print("[DL] Skipping FC masked write (no FC data).")
 
-        print(f"[DL] Writing ffmask to {ffmask_out}")
-        # Usually ffmask 0/1 is fine; no nodata needed, but you can add one if you like.
-        write_geotiff(ffmask, ffmask_out, dtype="uint8", nodata=None)
+
+        # # ---------------- SR composites (nbart & nbart_clr) ----------------
+        # sr_composite = composite_time_mean(sr_all, SR_BANDS)
+
+        # sr_masked = apply_fmask(sr_all[SR_BANDS], fmask, FMASK_CLEAR_VALUES)
+        # sr_composite_clr = composite_time_mean(sr_masked, SR_BANDS)
+
+        # # ffmask for this day (2D)
+        # ffmask = composite_fmask(fmask, FMASK_CLEAR_VALUES)
+
+        # # -----------------------------------------------------------------
+        # # Load FC for this date and apply the same FMASK
+        # # -----------------------------------------------------------------
+        # ds_fc = load_fc_for_day(dc, lat_range, lon_range, date_str, target_utm_epsg, crs_suffix)
+        # if ds_fc is None or ds_fc.sizes.get("time", 0) == 0:
+        #     print(f"[DL] No FC data loaded for {date_str}, skipping FC.")
+        #     fc_composite = None
+        #     fc_composite_clr = None
+        # else:
+        #     # Unmasked FC composite
+        #     fc_composite = composite_time_mean(ds_fc, FC_BANDS)
+
+        #     # Masked FC composite (clr)
+        #     fc_masked = apply_fmask(ds_fc[FC_BANDS], fmask, FMASK_CLEAR_VALUES)
+        #     fc_composite_clr = composite_time_mean(fc_masked, FC_BANDS)
+
+        # # -----------------------------------------------------------------
+        # # Dry-run mode: just report what we'd do
+        # # -----------------------------------------------------------------
+        # if dry_run:
+        #     print("[DL] Dry run – would write:")
+        #     print(f"  SR nbart      -> {sr_nb_out}")
+        #     print(f"  SR nbart_clr  -> {sr_nb_clr_out}")
+        #     print(f"  FC fcm        -> {fc_nb_out}")
+        #     print(f"  FC fcm_clr    -> {fc_nb_clr_out}")
+        #     print(f"  ffmask        -> {ffmask_out}")
+        #     print("[DL] and upload to S3 keys:")
+        #     print(f"  {sr_nb_key}")
+        #     print(f"  {sr_nb_clr_key}")
+        #     print(f"  {fc_nb_key}")
+        #     print(f"  {fc_nb_clr_key}")
+        #     print(f"  {ffmask_key}")
+        #     continue
+
+        # # -----------------------------------------------------------------
+        # # Write local GeoTIFFs (still in native CRS; no reprojection)
+        # # -----------------------------------------------------------------
+        # print(f"[DL] Writing SR (unmasked) composite to {sr_nb_out}")
+        # # SR: float32 with nodata = -999
+        # write_geotiff(sr_composite, sr_nb_out, dtype="float32", nodata=-999.0)
+
+        # print(f"[DL] Writing SR (masked) composite to {sr_nb_clr_out}")
+        # write_geotiff(sr_composite_clr, sr_nb_clr_out, dtype="float32", nodata=-999.0)
+
+        # sidecar = finalise_composite(
+        #     out_tif=sr_nb_clr_out,
+        #     ffmask_tif=ffmask_out,
+        #     provenance={**provenance, "PRODUCT_KIND": "SR_NBART_CLR"},
+        #     nodata_value=-999.0,
+        # )
+        # print(f"[META] Wrote SR clr metadata sidecar: {sidecar}")
+
+
+
+        # if fc_composite is not None:
+        #     print(f"[DL] Writing FC (unmasked) composite to {fc_nb_out}")
+        #     # FC: nodata code 255 (consistent with raw product)
+        #     write_geotiff(fc_composite, fc_nb_out, dtype="float32", nodata=255.0)
+        # else:
+        #     print("[DL] Skipping FC unmasked write (no FC data).")
+
+        # if fc_composite_clr is not None:
+        #     print(f"[DL] Writing FC (masked) composite to {fc_nb_clr_out}")
+        #     write_geotiff(fc_composite_clr, fc_nb_clr_out, dtype="float32", nodata=255.0)
+
+        #     sidecar = finalise_composite(
+        #         out_tif=fc_nb_clr_out,
+        #         ffmask_tif=ffmask_out,
+        #         provenance={**provenance, "PRODUCT_KIND": "FC_FCM_CLR"},
+        #         nodata_value=255.0,
+        #     )
+        #     print(f"[META] Wrote FC clr metadata sidecar: {sidecar}")
+
+        # else:
+        #     print("[DL] Skipping FC masked write (no FC data).")
+
+        # print(f"[DL] Writing ffmask to {ffmask_out}")
+        # # Usually ffmask 0/1 is fine; no nodata needed, but you can add one if you like.
+        # write_geotiff(ffmask, ffmask_out, dtype="uint8", nodata=None)
 
 
         # -----------------------------------------------------------------
@@ -807,6 +939,176 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+# ---------------------------------------------------------------------
+# Metadata finalisation (mask stats + provenance)
+# ---------------------------------------------------------------------
+
+def _pct(part: int, whole: int) -> float:
+    return 0.0 if whole <= 0 else (part / whole) * 100.0
+
+
+def _compute_ffmask_stats(ffmask_path: Path) -> dict:
+    """
+    Compute CLEAR/MASKED counts and percentages from ffmask (uint8):
+      clear = 1, masked = 0
+    Uses block reading to avoid loading whole rasters into memory.
+    """
+    gdal.UseExceptions()
+    ds = gdal.Open(str(ffmask_path), gdal.GA_ReadOnly)
+    if ds is None:
+        raise RuntimeError(f"Could not open ffmask: {ffmask_path}")
+
+    band = ds.GetRasterBand(1)
+    xsize, ysize = ds.RasterXSize, ds.RasterYSize
+    block_x, block_y = band.GetBlockSize()
+    if block_x <= 0 or block_y <= 0:
+        block_x, block_y = 1024, 1024  # fallback
+
+    total = 0
+    clear = 0
+
+    for yoff in range(0, ysize, block_y):
+        ywin = min(block_y, ysize - yoff)
+        for xoff in range(0, xsize, block_x):
+            xwin = min(block_x, xsize - xoff)
+            arr = band.ReadAsArray(xoff, yoff, xwin, ywin)
+            if arr is None:
+                continue
+            total += int(arr.size)
+            clear += int((arr == 1).sum())
+
+    masked = total - clear
+
+    return {
+        "FFMASK_TOTAL_PX": total,
+        "FFMASK_CLEAR_PX": clear,
+        "FFMASK_MASKED_PX": masked,
+        "CLEAR_PCT": round(_pct(clear, total), 6),
+        "MASKED_PCT": round(_pct(masked, total), 6),
+        "MASK_PCT_DEF": "ffmask==1 is clear; masked=total-clear; pct = count/total*100",
+    }
+
+
+def _write_gdal_metadata(tif_path: Path, md: dict) -> None:
+    """
+    Write metadata tags into an existing GeoTIFF without rewriting pixel data.
+    """
+    gdal.UseExceptions()
+    ds = gdal.Open(str(tif_path), gdal.GA_Update)
+    if ds is None:
+        raise RuntimeError(f"Could not open for update: {tif_path}")
+
+    # Convert everything to strings for GDAL metadata
+    for k, v in md.items():
+        if v is None:
+            continue
+        if isinstance(v, (list, dict)):
+            v = json.dumps(v, ensure_ascii=False)
+        ds.SetMetadataItem(str(k), str(v))
+
+    ds.FlushCache()
+    ds = None
+
+from pathlib import Path
+from datetime import datetime, timezone
+import json
+
+def finalise_composite(
+    out_tif: Path,
+    ffmask_tif: Path | None,
+    provenance: dict,
+    nodata_value: float | None,
+) -> Path:
+    """
+    Attach:
+      - mask stats derived from ffmask (if present)
+      - provenance (scene ids, cloud cover summary, methods)
+    into GeoTIFF metadata AND write a JSON sidecar.
+
+    Returns the JSON sidecar path.
+    """
+    if not out_tif.exists():
+        raise FileNotFoundError(out_tif)
+
+    stats: dict = {}
+    ffmask_path_str = ""
+
+    if ffmask_tif is None:
+        print("[WARN] FFMask path is None; proceeding without mask stats.")
+    elif not ffmask_tif.exists():
+        print(f"[WARN] FFMask missing: {ffmask_tif} (proceeding without mask stats)")
+    else:
+        # Only compute stats if the file exists
+        stats = _compute_ffmask_stats(ffmask_tif)
+        ffmask_path_str = str(ffmask_tif)
+
+    md = {
+        # processing + definition
+        "PROCESSING_TIMESTAMP_UTC": datetime.now(timezone.utc).isoformat(),
+        "MASK_METHOD": "binary_ffmask",
+        "FFMASK_PATH": ffmask_path_str,
+        "NODATA_VALUE": nodata_value if nodata_value is not None else "",
+        # percentages (only present if stats computed)
+        **stats,
+        # provenance (already curated)
+        **provenance,
+    }
+
+    # Write tags into GeoTIFF
+    _write_gdal_metadata(out_tif, md)
+
+    # Write sidecar JSON
+    sidecar = out_tif.with_suffix(out_tif.suffix + ".metadata.json")
+    sidecar.write_text(json.dumps(md, indent=2, ensure_ascii=False), encoding="utf-8")
+    return sidecar
+
+# def finalise_composite(
+#     out_tif: Path,
+#     ffmask_tif: Path,
+#     provenance: dict,
+#     nodata_value: float | None,
+# ) -> Path:
+#     """
+#     Attach:
+#       - mask stats derived from ffmask
+#       - provenance (scene ids, cloud cover summary, methods)
+#     into GeoTIFF metadata AND write a JSON sidecar.
+
+#     Returns the JSON sidecar path.
+#     """
+#     if not out_tif.exists():
+#         raise FileNotFoundError(out_tif)
+#     # if not ffmask_tif.exists():
+#     #     raise FileNotFoundError(ffmask_tif)
+#     if not ffmask_tif.exists():
+#         print(
+#             f"[WARN] FFMask missing for {tile_id} {scene_date:%Y%m%d}. "
+#             "Proceeding without FFMask sidecar."
+#         )
+#         ffmask_tif = None
+
+#     stats = _compute_ffmask_stats(ffmask_tif)
+
+#     md = {
+#         # processing + definition
+#         "PROCESSING_TIMESTAMP_UTC": datetime.now(timezone.utc).isoformat(),
+#         "MASK_METHOD": "binary_ffmask",
+#         "FFMASK_PATH": str(ffmask_tif),
+#         "NODATA_VALUE": nodata_value if nodata_value is not None else "",
+#         # percentages
+#         **stats,
+#         # provenance (already curated)
+#         **provenance,
+#     }
+
+#     # Write tags into GeoTIFF
+#     _write_gdal_metadata(out_tif, md)
+
+#     # Write sidecar JSON
+#     sidecar = out_tif.with_suffix(out_tif.suffix + ".metadata.json")
+#     sidecar.write_text(json.dumps(md, indent=2, ensure_ascii=False), encoding="utf-8")
+#     return sidecar
 
 
 def main() -> None:
