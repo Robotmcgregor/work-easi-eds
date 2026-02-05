@@ -30,3 +30,47 @@ exports/
 assets/
 data/
 output/
+
+# ---------------------------------
+# Geospatial data (DO NOT COMMIT)
+# ---------------------------------
+
+# Raster formats
+*.tif
+*.tiff
+*.img
+
+# Raster sidecars / metadata
+*.hdr
+*.aux
+*.aux.xml
+*.ovr
+*.rrd
+*.xml
+*.prj
+*.wld
+*.tfw
+
+# Vector formats (shapefiles + friends)
+*.shp
+*.shx
+*.dbf
+*.cpg
+*.qix
+*.sbn
+*.sbx
+
+# GeoPackages / other vector containers
+*.gpkg
+*.gdb/
+*.gdb/**
+
+# ---------------------------------
+# Explicitly allow ZIPs
+# ---------------------------------
+!*.zip
+
+# Local-only S3/AAD notebooks (contain creds/config)
+notebooks/aad_s3/
+
+

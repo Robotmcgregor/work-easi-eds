@@ -213,82 +213,6 @@ def stretch(
     stretched[img == ignoreVal] = 0
     return stretched.astype(np.uint8)
 
-def write_diag_stats_csv(values: np.ndarray, out_csv: Path, *, thresholds=(2.5, 6.0, 10.0)) -> None:
-    v = values.astype(np.float64)
-    v = v[np.isfinite(v)]
-    if v.size == 0:
-        out_csv.write_text("metric,count\nndviDiffStdErr,0\n", encoding="utf-8")
-        return
-
-    pct = np.percentile(v, [0, 1, 5, 10, 25, 50, 75, 90, 95, 99, 100])
-    lines = []
-    lines.append("metric,count,mean,std,min,p01,p05,p10,p25,p50,p75,p90,p95,p99,max")
-    lines.append(
-        "ndviDiffStdErr,"
-        f"{v.size},{v.mean():.6f},{v.std():.6f},"
-        f"{pct[0]:.6f},{pct[1]:.6f},{pct[2]:.6f},{pct[3]:.6f},{pct[4]:.6f},"
-        f"{pct[5]:.6f},{pct[6]:.6f},{pct[7]:.6f},{pct[8]:.6f},{pct[9]:.6f},{pct[10]:.6f}"
-    )
-
-    # threshold exceedance rates
-    lines.append("")
-    lines.append("threshold,percent_ge")
-    for t in thresholds:
-        lines.append(f"{t},{(np.mean(v >= t) * 100):.4f}")
-
-    out_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def write_diag_bins_csv(values: np.ndarray, out_csv: Path, *, bins=256, clip_abs=200.0) -> None:
-    v = values.astype(np.float64)
-    v = v[np.isfinite(v)]
-    if v.size == 0:
-        out_csv.write_text("bin_left,bin_right,count\n", encoding="utf-8")
-        return
-
-    v = np.clip(v, -clip_abs, clip_abs)
-    counts, edges = np.histogram(v, bins=bins)
-    with out_csv.open("w", encoding="utf-8") as f:
-        f.write("bin_left,bin_right,count\n")
-        for i in range(len(counts)):
-            f.write(f"{edges[i]:.6f},{edges[i+1]:.6f},{int(counts[i])}\n")
-
-def write_stats_csv(values: np.ndarray, out_csv: Path) -> None:
-    v = values[np.isfinite(values)]
-    if v.size == 0:
-        out_csv.write_text("count,mean,std,min,p01,p05,p10,p25,p50,p75,p90,p95,p99,max\n0\n")
-        return
-
-    pct = np.percentile(v, [1,5,10,25,50,75,90,95,99])
-    lines = [
-        "count,mean,std,min,p01,p05,p10,p25,p50,p75,p90,p95,p99,max",
-        f"{v.size},{v.mean():.6f},{v.std():.6f},{v.min():.6f},"
-        f"{pct[0]:.6f},{pct[1]:.6f},{pct[2]:.6f},{pct[3]:.6f},"
-        f"{pct[4]:.6f},{pct[5]:.6f},{pct[6]:.6f},{pct[7]:.6f},{pct[8]:.6f},{v.max():.6f}",
-        "",
-        "threshold,percent_ge",
-        f"2.5,{(np.mean(v >= 2.5) * 100):.4f}",
-        f"4.0,{(np.mean(v >= 4.0) * 100):.4f}",
-        f"6.0,{(np.mean(v >= 6.0) * 100):.4f}",
-        f"10.0,{(np.mean(v >= 10.0) * 100):.4f}",
-    ]
-    out_csv.write_text("\n".join(lines) + "\n")
-
-
-def write_bins_csv(values: np.ndarray, out_csv: Path, bins=256, clip=200.0) -> None:
-    v = values[np.isfinite(values)]
-    if v.size == 0:
-        out_csv.write_text("bin_left,bin_right,count\n")
-        return
-
-    v = np.clip(v, -clip, clip)
-    counts, edges = np.histogram(v, bins=bins)
-
-    with out_csv.open("w") as f:
-        f.write("bin_left,bin_right,count\n")
-        for i in range(len(counts)):
-            f.write(f"{edges[i]:.6f},{edges[i+1]:.6f},{counts[i]}\n")
-
 
 def main(argv=None) -> int:
     """Execute the legacy seasonal-window change detection using NDVI."""
@@ -306,11 +230,6 @@ def main(argv=None) -> int:
     ap.add_argument("--lookback", type=int, default=10)
     ap.add_argument("--omit-ndvi-start-threshold", action="store_true")
     ap.add_argument("--verbose", action="store_true")
-    ap.add_argument("--diagnostics", action="store_true", help="Write diagnostic stats/histograms for ndviDiffStdErr")
-    ap.add_argument("--vi-tag", default="vi-ndvi", help="Tag used in diagnostic filenames (default: vi-ndvi)")
-    ap.add_argument("--diag-bins", type=int, default=256, help="Histogram bin count (default 256)")
-    ap.add_argument("--diag-clip", type=float, default=200.0, help="Clip abs(values) for histograms (default 200)")
-
     args = ap.parse_args(argv)
 
     scene = args.scene.lower()
@@ -492,48 +411,6 @@ def main(argv=None) -> int:
         - 4.3794265 * s_test
     ).astype(np.float32)
 
-    # --------------------------------------------------
-    # DIAGNOSTIC OUTPUT: raw combined index (UNSTRETCHED)
-    # --------------------------------------------------
-
-    out_base = f"lztmre_{scene}_d{sd}{ed}_{args.vi_tag}"
-    diag_dir = Path(stdProjFilename(f"{out_base}_dllmz.img")).parent / "diagnostics"
-
-    print("diag dir: ", diag_dir)
-    diag_dir.mkdir(exist_ok=True)
-
-    # diag_name = f"{args.scene}_d{sd}"
-
-    combined_img = diag_dir / f"lztmre_{scene}_{sd}{ed}_combined_raw.img"
-
-    # combined_out = stdProjFilename(
-    #     f"lztmre_{scene}_{sd}_combined_raw.img"
-    # )
-
-    write_envi(
-        combined_img,
-        [combined_index],
-        georef,
-        dtype=gdal.GDT_Float32,
-        nodata=0
-    )
-
-    print("file sent to ", combined_img)
-
-
-    # In legacy FC:
-    #  - spectral_term ≈ small, stable
-    #  - fc_term ≈ bounded (0–100ish)
-    # → combined values clustered near 20–60
-
-    # With NDVI:
-    #  - ndvi_term:
-    #  - can be negative
-    #  - can spike strongly
-    #  - has different variance
-
-    # → combined values now span –50 to 700+
-
     # Clearing decision logic — mirror legacy DLL thresholds
     NO_CLEARING = 10
     NULL_CLEARING = 0
@@ -546,64 +423,8 @@ def main(argv=None) -> int:
     dll_class[(combined_index > 58.10) & (s_test < -2.34) & (spectral_index < -2.27)] = 39
 
     # NDVI-only class 3 (analogous to FPC-only): strong NDVI signal not explained by clearing thresholds
-    # ndviDiffStdErr = -ndvi_trend * base_stderr - original QLD calculation
-    # dll_class[(t_test > -1.70) & (ndviDiffStdErr > 740)] = 3
-
-    # ---- NDVI-only diagnostic metric (standardised change) ----
-    ndviDiffStdErr = -(ndvi_trend) / np.maximum(base_stderr, 0.2)
-
-    dll_class[(t_test > -1.70) & (ndviDiffStdErr > 6.0)] = 3   # you can tune this
-
-    # Output filenames (define early so diagnostics can use them)
-    out_base = f"lztmre_{scene}_d{sd}{ed}_{args.vi_tag}"
-    dll_path = stdProjFilename(f"{out_base}_dllmz.img")
-    dlj_path = stdProjFilename(f"{out_base}_dljmz.img")
-
-
-    # ------------------ DIAGNOSTICS ------------------
-    if args.diagnostics:
-        diag_mask = (
-            np.isfinite(ndviDiffStdErr)
-            & (base_stderr >= 0.2)
-            & (norm_start > 0)
-            & (norm_end > 0)
-        )
-        vals = ndviDiffStdErr[diag_mask]
-
-        diag_dir = Path(stdProjFilename(f"{out_base}_dllmz.img")).parent / "diagnostics"
-
-        print("diag dir: ", diag_dir)
-        diag_dir.mkdir(exist_ok=True)
-
-        diag_name = f"{args.scene}_d{sd}{ed}_{args.vi_tag}"
-
-        stats_csv = diag_dir / f"{diag_name}_ndviDiffStdErr_stats.csv"
-        bins_csv  = diag_dir / f"{diag_name}_ndviDiffStdErr_bins.csv"
-
-        write_diag_stats_csv(vals, stats_csv)
-        write_diag_bins_csv(vals, bins_csv, bins=args.diag_bins, clip_abs=args.diag_clip)
-
-        print(f"[DIAG] Stats CSV: {stats_csv}")
-        print(f"[DIAG] Bins  CSV: {bins_csv}")
-
-        # Optional histogram PNG (never crash if matplotlib missing)
-        try:
-            import matplotlib.pyplot as plt
-
-            vclip = np.clip(vals, -args.diag_clip, args.diag_clip)
-            plt.figure()
-            plt.hist(vclip, bins=args.diag_bins)
-            plt.axvline(2.5, linestyle="--")
-            plt.axvline(-2.5, linestyle="--")
-            plt.title("ndviDiffStdErr histogram (clipped)")
-            png_path = diag_dir / f"{diag_name}_ndviDiffStdErr.png"
-            plt.savefig(png_path, dpi=150, bbox_inches="tight")
-            plt.close()
-            print(f"[DIAG] Histogram PNG: {png_path}")
-        except Exception as e:
-            print(f"[DIAG] Histogram skipped (matplotlib unavailable): {e}")
-    # ------------------ /DIAGNOSTICS ------------------
-
+    ndviDiffStdErr = -ndvi_trend * base_stderr
+    dll_class[(t_test > -1.70) & (ndviDiffStdErr > 740)] = 3
 
     # Optional: force no-clearing where starting NDVI is very low
     if not args.omit_ndvi_start_threshold:
@@ -628,9 +449,9 @@ def main(argv=None) -> int:
 
     # Output filenames
     # Include the tile (scene) and the process used (vi=ndvi) in output names for traceability
-    # out_base = f"lztmre_{scene}_d{sd}{ed}_vi-ndvi"
-    # dll_path = stdProjFilename(f"{out_base}_dllmz.img")
-    # dlj_path = stdProjFilename(f"{out_base}_dljmz.img")
+    out_base = f"lztmre_{scene}_d{sd}{ed}_vi-ndvi"
+    dll_path = stdProjFilename(f"{out_base}_dllmz.img")
+    dlj_path = stdProjFilename(f"{out_base}_dljmz.img")
 
     if args.verbose:
         print(f"[Output] DLL: {dll_path}")
