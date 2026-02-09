@@ -1542,12 +1542,45 @@ def main():
     }.get(args.timeseries_source, "dc4mz")
 
 
+    # # Always define expected outputs (these must exist as variables even if we skip build)
+    # db8_start = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
+    # db8_end   = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
+    # dc4_glob = str(compat_dir / f"lztmre_{scene}_*_{dc4_tag}.img")
+
+    # print("\n[OUTPUT] db8 products")
+    # print(f"  db8 start expected: {db8_start.resolve()}")
+    # print(f"  db8 end   expected: {db8_end.resolve()}")
+
+    # print(f"  exists start: {db8_start.exists()}")
+    # print(f"  exists end:   {db8_end.exists()}")
+
+    # # Optional: fail FAST if they are missing
+    # if not db8_start.exists() or not db8_end.exists():
+    #     raise RuntimeError(
+    #         "[FATAL] db8 outputs missing after compat build.\n"
+    #         f"  start: {db8_start}\n"
+    #         f"  end:   {db8_end}\n"
+    #         "Check compat builder stdout above and confirm out-root."
+    #     )
+
+    # import sys
+    # sys.exit("db8 shut down db8 missing.")
+
     # Always define expected outputs (these must exist as variables even if we skip build)
     db8_start = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
     db8_end   = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
-    dc4_glob = str(compat_dir / f"lztmre_{scene}_*_{dc4_tag}.img")
+    dc4_glob  = str(compat_dir / f"lztmre_{scene}_*_{dc4_tag}.img")
 
+    # --- PRE-CHECK (before build decision) ---
+    print("\n[PRECHECK] db8 expected paths")
+    print(f"  eff_start={eff_start} -> {db8_start.resolve()} (exists={db8_start.exists()})")
+    print(f"  eff_end  ={eff_end} -> {db8_end.resolve()} (exists={db8_end.exists()})")
+    if eff_start == eff_end:
+        print("[WARN] eff_start == eff_end (same effective SR date) -> only ONE db8 filename is expected")
 
+    print("\n[PRECHECK] db8 currently on disk:")
+    for p in sorted(compat_dir.glob(f"lztmre_{scene}_*_db8mz.img")):
+        print(" ", p.resolve())
 
     # Look for existing dc4 stack members
     dc4_existing = _glob.glob(dc4_glob)
@@ -1608,6 +1641,26 @@ def main():
             results["inputs"]["compat_build"]["fc_patterns"] = list(map(str, fc_patterns))
 
             run_cmd(cmd_compat, args.dry_run, "build_compat", results)
+
+            print("\n[POSTCHECK] db8 after compat build")
+            print(f"  expected start: {db8_start.resolve()} (exists={db8_start.exists()})")
+            print(f"  expected end:   {db8_end.resolve()} (exists={db8_end.exists()})")
+
+            print("\n[POSTCHECK] db8 found (glob):")
+            db8_found = sorted(compat_dir.glob(f"lztmre_{scene}_*_db8mz.img"))
+            for p in db8_found:
+                print(" ", p.resolve())
+            print(f"[POSTCHECK] db8_found_count={len(db8_found)}")
+
+            # Optional HARD FAIL only when dates differ
+            if eff_start != eff_end and (not db8_start.exists() or not db8_end.exists()):
+                raise RuntimeError(
+                    "[FATAL] Expected TWO db8 files (different effective dates), but one is missing.\n"
+                    f"  eff_start={eff_start} -> {db8_start}\n"
+                    f"  eff_end={eff_end} -> {db8_end}\n"
+                    "Most likely: compat builder only consumes the LAST --sr-dir/--sr-date (argparse overwrite)."
+                )
+
 
 
 
@@ -1725,7 +1778,13 @@ def main():
     else:
         print("\n[STEP] build_compat")
         print("Existing compat products detected; skipping build (use --force-compat to rebuild)")
+        print("\n[POSTCHECK] db8 after skipping compat")
+        print(f"  expected start: {db8_start.resolve()} (exists={db8_start.exists()})")
+        print(f"  expected end:   {db8_end.resolve()} (exists={db8_end.exists()})")
 
+
+    # import sys
+    # sys.exit("[DEBUG] - db8 check")
 
     # Record compat outputs (these are what downstream steps will use)
     results.setdefault("outputs", {}).setdefault("compat", {})
@@ -1739,8 +1798,8 @@ def main():
 
     write_manifest(" (after section 7)")
 
-    # import sys
-    # sys.exit("forced stop section 7")
+    import sys
+    sys.exit("forced stop section 7")
     # print("Section 7 working..."*50)
 
     # ----------------------------------------------------------------------
@@ -1958,46 +2017,131 @@ def main():
     # import sys
     # sys.exit("forced stop section 9")
 
+    # # ----------------------------------------------------------------------
+    # # 10. Step 4: Polygonise clearing thresholds
+    # # ----------------------------------------------------------------------
+    # # Convert clearing classes (≥ thresholds, usually 34..39) into polygons.
+    # shp_base = compat_dir / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha"
+    # shp_base.mkdir(parents=True, exist_ok=True)
+
+    # poly_script = (
+    #     Path(__file__).resolve().parent / "easi_polygonize_merged_thresholds.py"
+    # )
+
+    # cmd_poly = [
+    #     pyexe,
+    #     str(poly_script),
+    #     "--dll",
+    #     str(dll),
+    #     "--out-dir",
+    #     str(shp_base),
+    #     "--min-ha",
+    #     str(args.min_ha),
+    #     "--thresholds",
+    #     *[str(t) for t in args.thresholds],
+    # ]
+
+    # # Record polygonisation parameters and output directory (provenance)
+    # results.setdefault("outputs", {}).setdefault("polygonize_thresholds", {})
+    # results["outputs"]["polygonize_thresholds"].update({
+    #     "dll": str(dll),
+    #     "out_dir": str(shp_base),
+    #     "min_ha": float(args.min_ha),
+    #     "thresholds": [int(t) for t in args.thresholds],
+    #     "script": str(poly_script),
+    #     "dry_run": bool(args.dry_run),
+    # })
+
+
+    # run_cmd(cmd_poly, args.dry_run, "polygonize_thresholds", results)
+
     # ----------------------------------------------------------------------
-    # 10. Step 4: Polygonise clearing thresholds
+    # 10. Step 4: Polygonise clearing (Option B preferred, legacy fallback)
     # ----------------------------------------------------------------------
-    # Convert clearing classes (≥ thresholds, usually 34..39) into polygons.
-    shp_base = compat_dir / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha"
+
+    shp_base = compat_dir / f"shp_d{eff_start}_{eff_end}_min{int(args.min_ha)}ha"
     shp_base.mkdir(parents=True, exist_ok=True)
 
     poly_script = (
-        Path(__file__).resolve().parent / "easi_polygonize_merged_thresholds.py"
+        Path(__file__).resolve().parent / "easi_polygonize_merged_thresholds_calibrate40_80_v2.py"
     )
 
-    cmd_poly = [
-        pyexe,
-        str(poly_script),
-        "--dll",
-        str(dll),
-        "--out-dir",
-        str(shp_base),
-        "--min-ha",
-        str(args.min_ha),
-        "--thresholds",
-        *[str(t) for t in args.thresholds],
-    ]
+    # Expected Option B diagnostics (written earlier in pipeline)
+    diag_dir = Path(dll).parent / "diagnostics"
+    clear_mask = diag_dir / f"lztmre_{scene}_d{eff_start}{eff_end}_{vi_tag}_clear_mask.img"
+    strong_mask = diag_dir / f"lztmre_{scene}_d{eff_start}{eff_end}_{vi_tag}_strong_mask.img"
 
-    # Record polygonisation parameters and output directory (provenance)
-    results.setdefault("outputs", {}).setdefault("polygonize_thresholds", {})
-    results["outputs"]["polygonize_thresholds"].update({
+    use_option_b = clear_mask.exists() and strong_mask.exists()
+
+    if use_option_b:
+        print("[PIPELINE] Using Option B polygonisation (CLEAR/STRONG masks)")
+
+        cmd_poly = [
+            pyexe,
+            str(poly_script),
+            "--dll",
+            str(dll),
+            "--clear-mask",
+            str(clear_mask),
+            "--strong-mask",
+            str(strong_mask),
+            "--strong-frac",
+            "0.05",
+            "--out-dir",
+            str(shp_base),
+            "--min-ha",
+            str(args.min_ha),
+        ]
+
+        poly_mode = "option_b_clear_strong"
+
+    else:
+        print("[PIPELINE] Using legacy threshold polygonisation (DLL classes)")
+
+        cmd_poly = [
+            pyexe,
+            str(poly_script),
+            "--dll",
+            str(dll),
+            "--out-dir",
+            str(shp_base),
+            "--min-ha",
+            str(args.min_ha),
+            "--thresholds",
+            *[str(t) for t in args.thresholds],
+        ]
+
+        poly_mode = "legacy_thresholds"
+
+    # ----------------------------------------------------------------------
+    # Provenance / logging
+    # ----------------------------------------------------------------------
+    results.setdefault("outputs", {}).setdefault("polygonize", {})
+    results["outputs"]["polygonize"].update({
+        "mode": poly_mode,
         "dll": str(dll),
         "out_dir": str(shp_base),
         "min_ha": float(args.min_ha),
-        "thresholds": [int(t) for t in args.thresholds],
         "script": str(poly_script),
         "dry_run": bool(args.dry_run),
     })
 
+    if use_option_b:
+        results["outputs"]["polygonize"].update({
+            "clear_mask": str(clear_mask),
+            "strong_mask": str(strong_mask),
+            "strong_frac": 0.05,
+        })
+    else:
+        results["outputs"]["polygonize"].update({
+            "thresholds": [int(t) for t in args.thresholds],
+        })
 
-    run_cmd(cmd_poly, args.dry_run, "polygonize_thresholds", results)
+    run_cmd(cmd_poly, args.dry_run, "polygonize", results)
 
-    # import sys
-    # sys.exit("forced stop section 10")
+
+    import sys
+    sys.exit("forced stop section 10")
 
     # ----------------------------------------------------------------------
     # 11. Step 5: Vector post-processing (clean up polygons)

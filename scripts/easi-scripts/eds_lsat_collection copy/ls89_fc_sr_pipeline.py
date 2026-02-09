@@ -193,9 +193,7 @@ def run_download_from_comparison(
     dry_run: bool = False,
     start_date: str | None = None,
     end_date: str | None = None,
-    sr_only: bool = False,
 ):
-
     """
     Call ls89_download_fc_sr_from_comparison.py for a single tile,
     using the given comparison CSV (season-filtered or full).
@@ -214,10 +212,6 @@ def run_download_from_comparison(
         "--lon-min", str(lon_min),
         "--lon-max", str(lon_max),
     ]
-
-    if sr_only:
-        cmd.append("--sr-only")
-
 
     if start_date is not None:
         cmd += ["--start-date", start_date]
@@ -285,7 +279,7 @@ def main():
         help=f"Path to ls89_fc_sr_query.py. Default: {DEFAULT_QUERY_SCRIPT}",
     )
 
-    # Seasonal filtering options
+    # 🔹 Seasonal filtering options
     parser.add_argument(
         "--season-core-start",
         type=str,
@@ -307,7 +301,7 @@ def main():
         help=f"Path to ls89_season_filter.py. Default: {DEFAULT_SEASON_SCRIPT}",
     )
 
-        # download-from-comparison options
+        # 🔹 NEW: download-from-comparison options
     parser.add_argument(
         "--download-script",
         type=str,
@@ -346,14 +340,6 @@ def main():
         action="store_true",
         help="Print commands but do not actually run ls89_fc_sr_query.py or season filter.",
     )
-
-    # Skip FC data
-    parser.add_argument(
-        "--sr-only",
-        action="store_true",
-        help="Run SR-only pipeline (skip all FC-related steps)"
-    )
-
 
     args = parser.parse_args()
 
@@ -537,9 +523,6 @@ def main():
                 print(f"[PIPELINE] No comparison table for tile {tile_id}, skipping download.")
                 continue
 
-            # import sys
-            # sys.exit("sys stop pipeline 1")
-
             run_download_from_comparison(
                 download_script=download_script_path,
                 comparison_csv=comp_for_download,
@@ -551,9 +534,7 @@ def main():
                 dry_run=args.dry_run,
                 start_date=args.download_start_date,
                 end_date=args.download_end_date,
-                sr_only=args.sr_only,
             )
-
 
 
 

@@ -47,6 +47,7 @@ from typing import List, Tuple
 
 import numpy as np
 from osgeo import gdal
+gdal.UseExceptions()
 
 try:
     from rsc.utils.metadb import stdProjFilename
@@ -288,6 +289,77 @@ def write_bins_csv(values: np.ndarray, out_csv: Path, bins=256, clip=200.0) -> N
         f.write("bin_left,bin_right,count\n")
         for i in range(len(counts)):
             f.write(f"{edges[i]:.6f},{edges[i+1]:.6f},{counts[i]}\n")
+
+
+def read_band_nodata_values(ds_or_path):
+    """
+    Return list of nodata values per band for a GDAL dataset OR a file path.
+
+    Accepts:
+      - GDAL Dataset (has .RasterCount)
+      - str/Path pointing to a raster (will gdal.Open it)
+    """
+    # If we were passed a path string/pathlib.Path, open it
+    if isinstance(ds_or_path, (str, os.PathLike)):
+        ds = gdal.Open(str(ds_or_path), gdal.GA_ReadOnly)
+        if ds is None:
+            raise RuntimeError(f"Cannot open raster for nodata read: {ds_or_path}")
+        close_after = True
+    else:
+        ds = ds_or_path
+        close_after = False
+
+    nodatas = []
+    for i in range(1, ds.RasterCount + 1):
+        band = ds.GetRasterBand(i)
+        nodatas.append(band.GetNoDataValue())
+
+    # Explicitly close if we opened it here
+    if close_after:
+        ds = None
+
+    return nodatas
+
+def sr_nodata_mask(ref_stack: np.ndarray, nodata_list) -> np.ndarray:
+    """
+    Build a boolean mask (rows, cols) where ANY SR band equals its nodata value.
+
+    Parameters
+    ----------
+    ref_stack : np.ndarray
+        SR stack shaped either (bands, rows, cols) or (rows, cols, bands).
+        Your code uses refStart[1], refStart[2] etc, so likely (bands, rows, cols).
+    nodata_list : list
+        Nodata value per band (same indexing as the stack).
+        None entries are ignored.
+
+    Returns
+    -------
+    np.ndarray (bool)
+        True where pixel is nodata in ANY band.
+    """
+    if ref_stack is None:
+        raise ValueError("sr_nodata_mask: ref_stack is None")
+
+    arr = ref_stack
+
+    # If stack is (rows, cols, bands), convert to (bands, rows, cols)
+    if arr.ndim == 3 and arr.shape[0] not in (4, 6, 7, 8) and arr.shape[-1] in (4, 6, 7, 8):
+        arr = np.moveaxis(arr, -1, 0)
+
+    if arr.ndim != 3:
+        raise ValueError(f"sr_nodata_mask: expected 3D array, got shape {arr.shape}")
+
+    bands, rows, cols = arr.shape
+    mask = np.zeros((rows, cols), dtype=bool)
+
+    for b in range(min(bands, len(nodata_list))):
+        nd = nodata_list[b]
+        if nd is None:
+            continue
+        mask |= (arr[b] == nd)
+
+    return mask
 
 
 def main(argv=None) -> int:
@@ -545,6 +617,17 @@ def main(argv=None) -> int:
     (norm_start > 0) &
     (norm_end > 0) &
     np.isfinite(combined_index)
+    )
+    
+    # -----------------------------------------------------
+    # Build SR nodata mask (refNullMask) for valid pixel filtering
+    # -----------------------------------------------------
+    start_nodatas = read_band_nodata_values(start_db8)
+    end_nodatas   = read_band_nodata_values(end_db8)
+
+    refNullMask = (
+        sr_nodata_mask(ref_start, start_nodatas) |
+        sr_nodata_mask(ref_end, end_nodatas)
     )
 
     valid_px &= ~refNullMask

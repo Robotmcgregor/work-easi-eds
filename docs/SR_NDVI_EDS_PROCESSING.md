@@ -226,3 +226,169 @@ python -m py_compile easi_slats_compat_builder_sr_ndvi.py easi_eds_legacy_method
 - NDVI formula: Rouse et al. (1974), *Monitoring vegetation systems in the Great Plains with ERTS*
 - Seasonal window approach: Legacy SLATS methodology
 - SR bands: USGS Landsat 8 and Sentinel-2 band definitions
+
+
+ ---
+  ---
+   ---
+# NDVI Clearing Detection — Calibration Update (Option B)
+
+## Overview
+
+This update implements a **calibrated NDVI-based clearing decision framework** within the EDS pipeline, replacing reliance on legacy DLL class thresholds (34–39) for final event detection.
+
+The goal was to **retain the legacy spectral logic**, while making the **decision step evidence-driven, interpretable, and defensible** when substituting NDVI for FC/FPC.
+
+---
+
+## What Changed (Summary)
+
+**Before**
+- Clearing confidence inferred indirectly from DLL classes (34–39)
+- Thresholds inherited from FC calibration
+- High false positives and inconsistent detection across tiles
+
+**After**
+- Clearing decisions derived directly from **raw combined index values**
+- Explicit, calibrated thresholds applied to NDVI-based signal
+- Polygon confidence determined by pixel-level strength
+- Legacy DLL retained for compatibility and diagnostics only
+
+---
+
+## Key Conceptual Shift
+
+The **raw combined index** is now treated as the *primary quantitative signal*, not the stretched or classified outputs.
+
+All thresholds were derived empirically from:
+- `p95` distributions inside known historical clearing polygons
+- Scene-by-scene validation across multiple tiles
+
+---
+
+## New Outputs Introduced
+
+### 1. Raw Combined Index (Unstretched)
+
+
+**Purpose**
+- Stores the raw combined index values (float32)
+- Used for calibration, validation, and audit
+- Not thresholded or stretched
+
+**This file is the authoritative calibration reference.**
+
+---
+
+### 2. Pixel-Level Decision Masks
+
+#### CLEAR mask
+output: lztmre_<scene>_d<start><end>_vi-ndvi_clear_mask.img
+
+Rule: combined_raw ≥ 40
+
+#### STRONG mask
+output: lztmre_<scene>_d<start><end>_vi-ndvi_strong_mask.img
+Rule:combined_raw ≥ 80
+
+
+These masks:
+- Apply only to valid SR + NDVI pixels
+- Are independent of legacy DLL class numbers
+- Form the basis for polygon generation
+
+---
+
+## Calibrated Thresholds (Option B)
+
+| Threshold | Meaning | Evidence Basis |
+|--------|--------|----------------|
+| 40 | CLEAR | Median p95 of known clearing polygons |
+| 80 | STRONG | Upper-tail p95 for confident, high-signal clearing |
+
+Thresholds were chosen to:
+- Minimise false positives
+- Preserve strong historical detections
+- Scale appropriately with NDVI variance
+
+---
+
+## Polygonisation Changes
+
+### Previous behaviour
+- Polygonised merged DLL classes (≥34)
+- No differentiation between weak and strong signal
+- Large number of low-confidence polygons
+
+### New behaviour
+- Polygonise **CLEAR mask**
+- Enforce minimum area (e.g. 10 ha)
+- Compute per-polygon **STRONG pixel fraction**
+
+Each polygon now contains:
+
+| Field | Meaning |
+|------|--------|
+| area_ha | Polygon area (hectares) |
+| p_strong | Proportion of STRONG pixels |
+| conf | `STRONG` if `p_strong ≥ threshold`, else `CLEAR` |
+
+This enables:
+- Confidence-based filtering
+- Transparent event classification
+- Consistent behaviour across tiles
+
+---
+
+## Role of Legacy DLL / DLJ Outputs
+
+The following outputs are **retained but downgraded in authority**:
+
+- `*_dllmz.img`
+- `*_dljmz.img`
+
+They are now used for:
+- Backward compatibility
+- Visual diagnostics
+- Historical comparison
+
+They are **no longer the primary clearing decision mechanism**.
+
+---
+
+## Why This Works Better
+
+- Thresholds are **data-derived**, not inherited
+- NDVI variance is explicitly handled
+- False positives are reduced by:
+  - Minimum area filtering
+  - Pixel-strength aggregation
+- Results are explainable:
+  - Raw values → thresholds → masks → polygons
+
+---
+
+## Final Clearing Products
+
+The authoritative outputs for end users are:
+
+
+output: scene_lztmre_<scene>_d<start><end>_vi-ndvi_dllmz_clear.shp
+
+
+These represent:
+- Validated clearing events
+- Calibrated to NDVI behaviour
+- Comparable across scenes and years
+
+---
+
+## Status
+
+- Calibration implemented and validated
+- Diagnostic evidence preserved
+- Polygon outputs aligned with observed clearing
+- Method now defensible for reporting and review
+
+**This establishes NDVI as a first-class clearing signal within EDS without rewriting the legacy method.**
+
