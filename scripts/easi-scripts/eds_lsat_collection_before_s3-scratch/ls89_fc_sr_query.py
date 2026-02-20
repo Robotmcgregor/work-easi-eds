@@ -129,7 +129,6 @@ def run_query(
     tile_path: int | None = None,
     tile_row: int | None = None,
     tile_id: str | None = None,
-    out_dir: str | None = None,
 ):
     # ...
     if tile_id and (tile_path is None or tile_row is None):
@@ -223,20 +222,11 @@ def run_query(
         return df
 
     # Where to write outputs
-    # span_tag = f"{t_start:%Y%m%d}{t_end:%Y%m%d}"
-    # out_root = Path.home() / "scratch" / "eds" / "queries" / span_tag
-    # out_root.mkdir(parents=True, exist_ok=True)
-
-    # print(f"Output directory: {out_root}")
-
     span_tag = f"{t_start:%Y%m%d}{t_end:%Y%m%d}"
-
-    base = Path(out_dir).expanduser().resolve() if out_dir else (Path.home() / "scratch" / "eds" / "queries")
-    out_root = base / span_tag
-
+    out_root = Path.home() / "scratch" / "eds" / "queries" / span_tag
     out_root.mkdir(parents=True, exist_ok=True)
-    print(f"Output directory: {out_root}")
 
+    print(f"Output directory: {out_root}")
 
     # placeholders so later checks are safe even if no data found
     df_sr_cc40 = pd.DataFrame()
@@ -469,14 +459,6 @@ def parse_args():
         default=None,
         help="WRS row. Optional (used if tile-id not given).",
     )
-
-    parser.add_argument(
-        "--out-dir",
-        type=str,
-        default=None,
-        help="Base output directory. If set, outputs go to <out-dir>/<span_tag>/",
-    )
-
 
     return parser.parse_args()
 

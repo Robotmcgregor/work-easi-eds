@@ -78,49 +78,6 @@ DEFAULT_DOWNLOAD_SCRIPT = (
 )
 
 
-
-
-
-# ---------------------------------------------------------------------
-# s3 scratch Helpers
-# ---------------------------------------------------------------------
-
-def run_cmd(cmd: list[str], dry_run: bool = False):
-    print("[CMD]", " ".join(cmd))
-    if dry_run:
-        print("[CMD] Dry run: not executing.")
-        return
-    subprocess.run(cmd, check=True)
-
-
-def s3_sync_dir(local_dir: Path, s3_uri: str, dry_run: bool = False):
-    local_dir = Path(local_dir)
-    if not local_dir.exists():
-        print(f"[S3] Local dir missing, skip: {local_dir}")
-        return
-    cmd = ["aws", "s3", "sync", str(local_dir) + "/", s3_uri.rstrip("/") + "/"]
-    run_cmd(cmd, dry_run=dry_run)
-
-
-def s3_cp_file(local_file: Path, s3_uri: str, dry_run: bool = False):
-    local_file = Path(local_file)
-    if not local_file.exists():
-        print(f"[S3] Local file missing, skip: {local_file}")
-        return
-    cmd = ["aws", "s3", "cp", str(local_file), s3_uri]
-    run_cmd(cmd, dry_run=dry_run)
-
-
-def safe_rmtree(path: Path, dry_run: bool = False):
-    path = Path(path)
-    if not path.exists():
-        return
-    print(f"[CLEAN] Removing local: {path}")
-    if dry_run:
-        print("[CLEAN] Dry run: not deleting.")
-        return
-    shutil.rmtree(path)
-
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
@@ -152,7 +109,6 @@ def run_ls89_fc_sr_query(
     lon_min: float,
     lon_max: float,
     span_years: int,
-    out_dir: Path | None = None,
     dry_run: bool = False,
     tile_id: str | None = None,
     tile_path: int | None = None,
@@ -172,11 +128,7 @@ def run_ls89_fc_sr_query(
         "--span-years", str(span_years),
     ]
 
-    if out_dir is not None:
-        cmd += ["--out-dir", str(out_dir)]
-
-
-    # ONLY ONE of these is needed, tile_id is nicest
+    # 🔹 ONLY ONE of these is needed, tile_id is nicest
     if tile_id is not None:
         cmd += ["--tile-id", tile_id]
     elif tile_path is not None and tile_row is not None:
@@ -402,37 +354,6 @@ def main():
         help="Run SR-only pipeline (skip all FC-related steps)"
     )
 
-    parser.add_argument(
-        "--local-root",
-        type=str,
-        default=str(HOME / "scratch" / "eds"),
-        help="Local working root (default: ~/scratch/eds).",
-    )
-
-    parser.add_argument(
-        "--s3-prefix",
-        type=str,
-        default=None,
-        help=(
-            "S3 scratch base prefix to store outputs, e.g. "
-            "'s3://dcceew-prod-user-scratch/...:robotmcgregor/eds'. "
-            "If set, pipeline will sync outputs to S3."
-        ),
-    )
-
-    parser.add_argument(
-        "--s3-sync-each-tile",
-        action="store_true",
-        help="If set (and --s3-prefix), sync outputs to S3 after each tile completes.",
-    )
-
-    parser.add_argument(
-        "--s3-delete-local-after-sync",
-        action="store_true",
-        help="If set (and --s3-prefix), delete local per-tile outputs after successful sync.",
-    )
-
-
 
     args = parser.parse_args()
 
@@ -478,29 +399,8 @@ def main():
         start_date_dt = end_date_dt - timedelta(days=365 * args.span_years)
 
     span_tag = f"{start_date_dt:%Y%m%d}{end_date_dt:%Y%m%d}"
-    # out_root = HOME / "scratch" / "eds" / "queries" / span_tag
-
-    local_root = Path(args.local_root).expanduser().resolve()
-    queries_root = local_root / "queries" / span_tag
-    tiles_root = local_root / "tiles"
-
-    out_root = queries_root  # keep variable name used below
-    print(f"Local root   : {local_root}")
-    print(f"Queries out  : {queries_root}")
-    print(f"Tiles out    : {tiles_root}")
-
+    out_root = HOME / "scratch" / "eds" / "queries" / span_tag
     print(f"Expected output directory for query: {out_root}")
-
-    # s3 SCRATCH
-    s3_queries_root = None
-    s3_tiles_root = None
-    if args.s3_prefix:
-        s3_base = args.s3_prefix.rstrip("/")
-        s3_queries_root = f"{s3_base}/queries/{span_tag}"
-        s3_tiles_root = f"{s3_base}/tiles"
-        print(f"[S3] Queries target: {s3_queries_root}")
-        print(f"[S3] Tiles target  : {s3_tiles_root}")
-
 
     # -----------------------------------------------------------------
     # Load tile grid
@@ -569,13 +469,11 @@ def main():
             lon_min=lon_min,
             lon_max=lon_max,
             span_years=args.span_years,
-            out_dir=queries_root,
             dry_run=args.dry_run,
-            tile_id=tile_id,
+            tile_id=tile_id,      # also passes tile_path/row via CLI
             tile_path=path_val,
             tile_row=rownum,
         )
-
 
         # 2) Post-process comparison_table: rename + optional season filter
         comp_generic = out_root / "comparison_table.csv"
@@ -655,32 +553,6 @@ def main():
                 end_date=args.download_end_date,
                 sr_only=args.sr_only,
             )
-
-
-        # -----------------------------------------------------------------
-        # S3: sync outputs per tile (optional)
-        # -----------------------------------------------------------------
-        if args.s3_prefix and args.s3_sync_each_tile:
-            # 1) sync per-tile comparison tables
-            # (these live in queries_root)
-            # We'll push just the 2-3 CSVs for this tile using cp.
-            if tile_comp is not None and tile_comp.exists():
-                s3_cp_file(tile_comp, f"{s3_queries_root}/{tile_comp.name}", dry_run=args.dry_run)
-            if tile_comp_season is not None and tile_comp_season.exists():
-                s3_cp_file(tile_comp_season, f"{s3_queries_root}/{tile_comp_season.name}", dry_run=args.dry_run)
-
-            # 2) sync tile folder (whatever the download script produced)
-            # Assumption: download script writes under local tiles_root/<tile_id>/
-            local_tile_dir = tiles_root / tile_id
-            s3_tile_dir = f"{s3_tiles_root}/{tile_id}"
-
-            print(f"[S3] Syncing tile outputs: {local_tile_dir} -> {s3_tile_dir}")
-            s3_sync_dir(local_tile_dir, s3_tile_dir, dry_run=args.dry_run)
-
-            # 3) optional cleanup
-            if args.s3_delete_local_after_sync:
-                safe_rmtree(local_tile_dir, dry_run=args.dry_run)
-
 
 
 

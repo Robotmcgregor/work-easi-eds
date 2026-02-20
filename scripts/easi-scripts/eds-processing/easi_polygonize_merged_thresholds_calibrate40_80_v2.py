@@ -226,6 +226,7 @@ def polygonize_mask(
     mem_ds = None
     ds_val = None
     ds_msk = None
+    
     return kept, orig
 
 
