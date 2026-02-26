@@ -16,6 +16,10 @@ from lib.cog import to_cog
 
 @dataclass(frozen=True)
 class MaskVectorOutputs:
+    """
+    Simple container for mask vector output paths.
+    Just groups everything together so its easier to pass around.
+    """
     strong_mask_local: Path
     clear_mask_local: Path
     strong_mask_s3: str
@@ -53,7 +57,6 @@ def _write_mask_geotiff(
     with rasterio.open(out_raw, "w", **profile) as dst:
         dst.write(mask_u8, 1)
 
-
 def _polygonise_mask(
     *,
     mask_u8: np.ndarray,
@@ -61,37 +64,45 @@ def _polygonise_mask(
     crs,
     min_area_ha: float = 0.0,
 ) -> gpd.GeoDataFrame:
-    """Polygonise pixels == 1 into polygons in the raster CRS."""
+    """Turn pixels == 1 into polygons (stays in the raster CRS)."""
+
+    # make sure mask is uint8 because thats what shapes() expects basically
     if mask_u8.dtype != np.uint8:
         mask_u8 = mask_u8.astype(np.uint8)
 
+    # rasterio shapes generator (only where mask == 1)
     geom_val_iter = shapes(mask_u8, mask=(mask_u8 == 1), transform=transform)
 
+    # collect geometries + values
     geoms: List = []
     vals: List[int] = []
     for geom, val in geom_val_iter:
+        # only keep the 1s (should already be filtered but just in case)
         if int(val) != 1:
             continue
         geoms.append(shape(geom))
         vals.append(int(val))
 
+    # if nothing came back, return empty gdf
     if not geoms:
-        # empty result
         return gpd.GeoDataFrame({"value": [], "area_ha": []}, geometry=[], crs=crs)
 
+    # build geodataframe
     gdf = gpd.GeoDataFrame({"value": vals}, geometry=geoms, crs=crs)
 
-    # area in m^2 if CRS is metres (EPSG:283xx is metres)
+    # area in hectares (assumes CRS is metres which it probably is)
     gdf["area_ha"] = gdf.geometry.area / 10_000.0
 
+    # optionally drop tiny polygons
     if min_area_ha and float(min_area_ha) > 0:
         gdf = gdf[gdf["area_ha"] >= float(min_area_ha)].copy()
 
-    # Clean invalid geometries (Option B polish)
+    # try to clean invalid geometry (buffer(0) hack)
     try:
         gdf["geometry"] = gdf["geometry"].buffer(0)
         gdf = gdf[gdf.geometry.notnull() & ~gdf.geometry.is_empty]
     except Exception:
+        # ignore if it fails
         pass
 
     return gdf

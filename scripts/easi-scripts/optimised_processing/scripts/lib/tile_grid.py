@@ -6,13 +6,27 @@ import geopandas as gpd
 import math
 
 def derive_target_epsg_gda94_mga_from_lon(lon: float) -> int:
+    # UTM/MGA zones are 6 degrees wide.
+    # This formula figures out which zone the longitude falls into.
+    # It shifts longitude into a 0–360 range, divides by 6 degrees,
+    # and floors it to get the zone number.
     zone = int(math.floor((lon + 180.0) / 6.0) + 1)
+
+    # MGA zones use EPSG codes 28301–28360 (GDA94).
+    # So we just add the zone number onto 28300.
     return 28300 + zone
 
 # back-compat wrapper (keep this)
 def derive_target_epsg_gda94_mga(geom_wgs84) -> int:
+    # Take the bounding box of the geometry (in WGS84 lon/lat)
     minx, miny, maxx, maxy = geom_wgs84.bounds
+
+    # Work out the centre longitude of the tile/geometry.
+    # We use the centre so we don't accidentally pick the wrong zone
+    # if the bbox slightly overlaps a boundary.
     centre_lon = (minx + maxx) / 2.0
+
+    # Hand off to the longitude-based function to get the correct MGA EPSG
     return derive_target_epsg_gda94_mga_from_lon(centre_lon)
 
 

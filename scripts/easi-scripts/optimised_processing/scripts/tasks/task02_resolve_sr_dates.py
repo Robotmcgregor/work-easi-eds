@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
+
+
 import pandas as pd
 
 from lib.tile_grid import load_tile_bbox_wgs84, derive_target_epsg_gda94_mga_from_lon
@@ -27,15 +29,15 @@ def resolve_sr_start_end(
 ) -> ResolvedSR:
     """Resolve SR "effective" start/end scenes for a tile.
 
-    Method:
-      1) Query datacube for SR ARD scenes intersecting tile bbox.
-      2) Filter strictly by scene-level cloud metadata <= cloud_max.
-      3) Choose:
-         - start scene: nearest date <= start_date
-         - end scene:   nearest date >= end_date
+    How it works (basic idea):
+    1) query datacube for SR ARD scenes that touch the tile bbox
+    2) filter using scene cloud metadata <= cloud_max (strict)
+    3) pick:
+        - start scene = closest date on/before start_date
+        - end scene   = closest date on/after end_date
 
-    This matches the intent of the original EDS processing pipeline, but uses the
-    datacube-native manifest approach (same as optimised_ndvi).
+    This is basically what the old EDS pipeline was trying to do, just using the
+    datacube manifest style like optimised_ndvi does.
     """
     tile = tile.lower().strip()
 
@@ -83,7 +85,7 @@ def resolve_sr_start_end(
 
     # ---- clamp start/end to available archive range (still respecting cloud_max) ----
     if len(before) == 0:
-        # start_date earlier than available data → use earliest available
+        # start_date earlier than available data ---->>>> use earliest available
         start_row = df.iloc[0]
         print(
             f"[WARN] No SR scenes on/before start_date={sd} for tile={tile} "

@@ -24,13 +24,28 @@ class ConvertedOutputs:
 
 
 def _envi_img_to_tif(src_img: Path, dst_tif: Path) -> None:
-    """Convert ENVI .img (plus .hdr sidecar) to GeoTIFF preserving values."""
+    """
+    Convert an ENVI .img file to a GeoTIFF.
+
+    This just copies the data across and keeps the values the same.
+    Assumes the .hdr file is next to the .img. Optimised for Cloud.. Hopefully...
+    """
+    # open the envi image
     with rasterio.open(src_img) as src:
+        # copy the existing profile
         profile = src.profile.copy()
+
+        # switch output driver to GeoTIFF
         profile.update(driver="GTiff")
+
+        # read all the data into memory
         data = src.read()
+
+        # write it out as a tif
         with rasterio.open(dst_tif, "w", **profile) as dst:
             dst.write(data)
+
+            # copy tags over as well (just in case)
             dst.update_tags(**src.tags())
 
 
@@ -46,7 +61,6 @@ def convert_outputs_to_cog_and_upload(
 ) -> ConvertedOutputs:
     """Convert legacy ENVI outputs (dllmz/dljmz) to COG GeoTIFF and upload to S3.
 
-    Returns local paths for both COGs and a list of uploaded S3 URIs.
     """
     tile = tile.lower().strip()
     work_dir = Path(work_dir)

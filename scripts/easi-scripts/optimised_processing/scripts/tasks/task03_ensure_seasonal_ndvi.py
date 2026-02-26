@@ -17,7 +17,7 @@ from tasks.task03_process_scene_ndvi import process_scene_to_s3
 @dataclass(frozen=True)
 class SeasonalNDVIPlan:
     window: SeasonalWindow
-    required_rows: pd.DataFrame  # rows to use (date/platform/product/epsg/bbox)
+    required_rows: pd.DataFrame  # rows it should use use (date/platform/ product/epsg/ bbox)
 
 
 def build_seasonal_ndvi_plan(

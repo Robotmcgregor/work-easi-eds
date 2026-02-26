@@ -50,15 +50,16 @@ def build_db8_sr_to_s3(
     rebase: bool = False,
     dry_run: bool = False,
 ) -> Db8Output:
-    """Create a 6-band SR stack ("db8") for a single scene date and upload to S3.
+    """Create a 6-band SR stack ("db8") for one scene date and upload it to S3.
 
-    - Loads SR bands + oa_fmask for the given date
-    - Picks best time slice by % clear land (oa_fmask == 1)
-    - Masks non-clear pixels to nodata
-    - Writes GeoTIFF, then converts to COG (lossless)
+    What it does:
+    - load the SR bands + oa_fmask for the date
+    - if multiple slices come back, pick the best one based on clear land % (oa_fmask == 1)
+    - mask anything thats not clear to nodata
+    - write a geotiff and then convert to a COG (should be lossless)
 
     Output layout:
-      {s3_prefix}/tiles/{tile}/db8/{platform}/{YYYY}/{YYYYMMDD}/lztmre_{tile}_{YYYYMMDD}_db8_{epsg}.tif
+    {s3_prefix}/tiles/{tile}/db8/{platform}/{YYYY}/{YYYYMMDD}/lztmre_{tile}_{YYYYMMDD}_db8_{epsg}.tif
     """
     import datacube
     import re
@@ -146,6 +147,9 @@ def build_db8_sr_to_s3(
     def land_clear_mask(oa):
         v = valid_mask(oa)
         return (oa == LAND_CLEAR_VALUE) & v
+
+
+
 
     # choose best time slice by clear land%
     oa = ds['oa_fmask']

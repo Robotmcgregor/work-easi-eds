@@ -15,8 +15,9 @@ def stage_dc4_ndvi_locally(
     dry_run: bool = False,
 ) -> Path:
 
-    """Download required NDVI COGs from S3 to a local folder.
-
+    """
+    
+    Download required NDVI COGs from S3 to a local folder.
     required_dates: list of (YYYYMMDD, platform, epsg)
     Returns the local directory containing the files.
     """
