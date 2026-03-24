@@ -13,6 +13,24 @@ from shapely.geometry import shape
 from lib.s3_io import upload_file_to_s3
 from lib.cog import to_cog
 
+import re
+
+def _insert_tag_before_epsg(base_name: str, tag: str) -> str:
+    """
+    Insert a tag before the trailing _e#### part.
+
+    Example:
+      sl8olre_p089r080_d2025060720260109_dlj_e32756
+    + dlj-clear-ge80
+    -> sl8olre_p089r080_d2025060720260109_dlj-clear-ge80_e32756
+    """
+    m = re.match(r"^(.*?)(?:_e(\d+))$", base_name)
+    if not m:
+        raise ValueError(f"Could not parse EPSG suffix from base name: {base_name}")
+
+    prefix = m.group(1)
+    epsg = m.group(2)
+    return f"{prefix}-{tag}_e{epsg}"
 
 @dataclass(frozen=True)
 class MaskVectorOutputs:
@@ -123,6 +141,11 @@ def _upload_shapefile_folder(local_dir: Path, bucket: str, s3_prefix: str) -> No
             key = f"{s3_prefix.rstrip('/')}/{p.name}"
             upload_file_to_s3(str(p), bucket=bucket, key=key)
 
+def _output_base_from_dlj(dljmz_cog_local: Path) -> str:
+    """
+    Use the final DLJ filename stem as the base for downstream masks/vectors.
+    """
+    return Path(dljmz_cog_local).stem
 
 def make_masks_and_vectors(
     *,
@@ -150,23 +173,67 @@ def make_masks_and_vectors(
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    # masks_s3_dir = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/masks"
+    # vec_s3_dir   = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/vectors"
+
+    # strong_mask_key = f"{masks_s3_dir}/lztmre_{tile}_{run_tag}_strong_ge{int(strong_threshold):02d}_mask_cog.tif"
+    # clear_mask_key  = f"{masks_s3_dir}/lztmre_{tile}_{run_tag}_clear_ge{int(clear_threshold):02d}_mask_cog.tif"
+
+    # # strong_mask_raw = work_dir / f"{tile}_{run_tag}_strong_mask_raw.tif"
+    # # clear_mask_raw  = work_dir / f"{tile}_{run_tag}_clear_mask_raw.tif"
+
+    # # strong_mask_cog = work_dir / f"{tile}_{run_tag}_strong_mask_cog.tif"
+    # # clear_mask_cog  = work_dir / f"{tile}_{run_tag}_clear_mask_cog.tif"
+
+    # strong_mask_raw = work_dir / f"{run_tag}_strong_mask_raw.tif"
+    # clear_mask_raw  = work_dir / f"{run_tag}_clear_mask_raw.tif"
+
+    # strong_mask_cog = work_dir / f"{run_tag}_strong_mask_cog.tif"
+    # clear_mask_cog  = work_dir / f"{run_tag}_clear_mask_cog.tif"
+
+    # strong_vec_dir = work_dir / "vectors" / "strong"
+    # clear_vec_dir  = work_dir / "vectors" / "clear"
+
+    # strong_vec_prefix = f"{vec_s3_dir}/strong_ge{int(strong_threshold):02d}"
+    # clear_vec_prefix  = f"{vec_s3_dir}/clear_ge{int(clear_threshold):02d}"
+
+
     masks_s3_dir = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/masks"
     vec_s3_dir   = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/vectors"
 
-    strong_mask_key = f"{masks_s3_dir}/lztmre_{tile}_{run_tag}_strong_ge{int(strong_threshold):02d}_mask_cog.tif"
-    clear_mask_key  = f"{masks_s3_dir}/lztmre_{tile}_{run_tag}_clear_ge{int(clear_threshold):02d}_mask_cog.tif"
+    # base_name = _output_base_from_dlj(dljmz_cog_local)
 
-    # strong_mask_raw = work_dir / f"{tile}_{run_tag}_strong_mask_raw.tif"
-    # clear_mask_raw  = work_dir / f"{tile}_{run_tag}_clear_mask_raw.tif"
+    # strong_mask_stem = f"{base_name}_strong_ge{int(strong_threshold):02d}_mask"
+    # clear_mask_stem  = f"{base_name}_clear_ge{int(clear_threshold):02d}_mask"
 
-    # strong_mask_cog = work_dir / f"{tile}_{run_tag}_strong_mask_cog.tif"
-    # clear_mask_cog  = work_dir / f"{tile}_{run_tag}_clear_mask_cog.tif"
+    # strong_vec_stem = f"{base_name}_strong_ge{int(strong_threshold):02d}"
+    # clear_vec_stem  = f"{base_name}_clear_ge{int(clear_threshold):02d}"
 
-    strong_mask_raw = work_dir / f"{run_tag}_strong_mask_raw.tif"
-    clear_mask_raw  = work_dir / f"{run_tag}_clear_mask_raw.tif"
+    base_name = _output_base_from_dlj(dljmz_cog_local)
 
-    strong_mask_cog = work_dir / f"{run_tag}_strong_mask_cog.tif"
-    clear_mask_cog  = work_dir / f"{run_tag}_clear_mask_cog.tif"
+    strong_core = _insert_tag_before_epsg(
+        base_name,
+        f"dlj-strong-ge{int(strong_threshold):02d}",
+    )
+    clear_core = _insert_tag_before_epsg(
+        base_name,
+        f"dlj-clear-ge{int(clear_threshold):02d}",
+    )
+
+    strong_mask_stem = strong_core
+    clear_mask_stem  = clear_core
+
+    strong_vec_stem = strong_core
+    clear_vec_stem  = clear_core
+
+    strong_mask_key = f"{masks_s3_dir}/{strong_mask_stem}.tif"
+    clear_mask_key  = f"{masks_s3_dir}/{clear_mask_stem}.tif"
+
+    strong_mask_raw = work_dir / f"{strong_mask_stem}_raw.tif"
+    clear_mask_raw  = work_dir / f"{clear_mask_stem}_raw.tif"
+
+    strong_mask_cog = work_dir / f"{strong_mask_stem}.tif"
+    clear_mask_cog  = work_dir / f"{clear_mask_stem}.tif"
 
     strong_vec_dir = work_dir / "vectors" / "strong"
     clear_vec_dir  = work_dir / "vectors" / "clear"
@@ -343,9 +410,12 @@ def make_masks_and_vectors(
 
     print("="*80 + "\n")
 
-    _write_shapefile_set(gdf_strong, strong_vec_dir, stem=f"lztmre_{tile}_{run_tag}_strong_ge{int(strong_threshold):02d}")
-    _write_shapefile_set(gdf_clear,  clear_vec_dir,  stem=f"lztmre_{tile}_{run_tag}_clear_ge{int(clear_threshold):02d}")
+    # _write_shapefile_set(gdf_strong, strong_vec_dir, stem=f"lztmre_{tile}_{run_tag}_strong_ge{int(strong_threshold):02d}")
+    # _write_shapefile_set(gdf_clear,  clear_vec_dir,  stem=f"lztmre_{tile}_{run_tag}_clear_ge{int(clear_threshold):02d}")
 
+
+    _write_shapefile_set(gdf_strong, strong_vec_dir, stem=strong_vec_stem)
+    _write_shapefile_set(gdf_clear,  clear_vec_dir,  stem=clear_vec_stem)
     # Upload shapefile folders (all sidecar files)
     _upload_shapefile_folder(strong_vec_dir, bucket=bucket, s3_prefix=strong_vec_prefix)
     _upload_shapefile_folder(clear_vec_dir,  bucket=bucket, s3_prefix=clear_vec_prefix)

@@ -322,10 +322,10 @@ def process_scene_to_s3(
         skip_broken_datasets=True,
     )
 
-    print("\n=== CRS DEBUG ===")
-    print("Returned dataset CRS:", ds.odc.geobox.crs)
-    print("Resolution:", ds.odc.geobox.resolution)
-    print("=================\n")
+    # print("\n=== CRS DEBUG ===")
+    # print("Returned dataset CRS:", ds.odc.geobox.crs)
+    # print("Resolution:", ds.odc.geobox.resolution)
+    # print("=================\n")
 
 
     # import sys

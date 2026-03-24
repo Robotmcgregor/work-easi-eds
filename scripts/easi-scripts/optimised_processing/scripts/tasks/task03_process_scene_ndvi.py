@@ -15,7 +15,7 @@ import numpy as np
 
 def process_scene_to_s3(
     tile: str,
-    date: str,              # YYYYMMDD
+    date: str,
     platform: str,
     product: str,
     lon_min: float,
@@ -69,7 +69,11 @@ def process_scene_to_s3(
 
 
     # print some logs so we can see what scene its doing
-    print(f"[INFO] Loading {tile} {platform} {date} product={product} EPSG:{target_epsg}")
+    # print(f"[INFO] Loading {tile} {platform} {date} product={product} EPSG:{target_epsg}")
+    # print(f"[DEBUG] lon=({lon_min}, {lon_max}) lat=({lat_min}, {lat_max}) time={time}")
+
+    # print some logs so we can see what scene its doing
+    print(f"[INFO] Loading {tile} {platform} {date} product={product} (native CRS mode)")
     print(f"[DEBUG] lon=({lon_min}, {lon_max}) lat=({lat_min}, {lat_max}) time={time}")
 
     # ------------------------------------------------------------------
@@ -105,22 +109,61 @@ def process_scene_to_s3(
             # if anything goes wrong just treat it as not matching
             return False
 
+
+    # ------------------------------------------------------------------
+    # Resolve dataset native EPSG (avoid product default grid like EPSG:3577)
+    # ------------------------------------------------------------------
+    dss = dc.find_datasets(
+        product=product,
+        measurements=["nbart_red"],
+        time=time,
+        lon=(float(lon_min), float(lon_max)),
+        lat=(float(lat_min), float(lat_max)),
+    )
+    dss = [d for d in dss if only_this_tile(d)]
+
+    # if not dss:
+    #     raise RuntimeError(f"No datasets found for tile={tile} product={product} date={date}")
+
+    if not dss:
+        print(f"[WARN] No datasets found for tile={tile} product={product} date={date} — skipping")
+        return None
+
+    native_epsg = getattr(getattr(dss[0], "crs", None), "epsg", None)
+    if native_epsg is None:
+        raise RuntimeError(f"Dataset has no EPSG code (crs={getattr(dss[0], 'crs', None)}) for {tile} {date}")
+
+    native_epsg = int(native_epsg)
+    print(f"[INFO] Dataset native EPSG: {native_epsg}")
+
     # ------------------------------------------------------------------
     # Load data
     # ------------------------------------------------------------------
+    # ds = dc.load(
+    #     product=product,
+    #     measurements=["nbart_red", "nbart_nir", "oa_fmask"],
+    #     time=time,
+    #     lon=(float(lon_min), float(lon_max)),
+    #     lat=(float(lat_min), float(lat_max)),
+    #     output_crs=f"EPSG:{int(target_epsg)}",
+    #     resolution=(-float(resolution), float(resolution)),
+    #     dask_chunks=dask_chunks,
+    #     dataset_predicate=only_this_tile,
+    #     skip_broken_datasets=True,
+    # )
     ds = dc.load(
         product=product,
         measurements=["nbart_red", "nbart_nir", "oa_fmask"],
         time=time,
         lon=(float(lon_min), float(lon_max)),
         lat=(float(lat_min), float(lat_max)),
-        output_crs=f"EPSG:{int(target_epsg)}",
-        resolution=(-float(resolution), float(resolution)),
+        # output_crs=f"EPSG:{native_epsg}",   
+        output_crs=f"EPSG:{int(target_epsg)}",               # native CRS
+        resolution=(-float(resolution), float(resolution)),# keep 30 m
         dask_chunks=dask_chunks,
         dataset_predicate=only_this_tile,
         skip_broken_datasets=True,
     )
-
     # Hard-skip if datacube had to ignore broken datasets (prevents tiny outputs)
     for band in ["oa_fmask", "nbart_red", "nbart_nir"]:
         try:
@@ -226,14 +269,26 @@ def process_scene_to_s3(
     # IMPORTANT: ensure cog.py can determine CRS.
     # We *know* output_crs == EPSG:target_epsg
     # ------------------------------------------------------------------
+    # ndvi.attrs["crs"] = f"EPSG:{int(target_epsg)}" 
+    # ffmask.attrs["crs"] = f"EPSG:{int(target_epsg)}"
+    # ndvi.attrs["crs"] = f"EPSG:{native_epsg}"
+    # ffmask.attrs["crs"] = f"EPSG:{native_epsg}"
     ndvi.attrs["crs"] = f"EPSG:{int(target_epsg)}"
     ffmask.attrs["crs"] = f"EPSG:{int(target_epsg)}"
 
     # local staging filenames
-    ndvi_local = work_dir / f"lztmre_{tile}_{date}_ndvi_{int(target_epsg)}.tif"
-    fmk_local  = work_dir / f"lztmre_{tile}_{date}_ffmask_{int(target_epsg)}.tif"
+    # ndvi_local = work_dir / f"lztmre_{tile}_{date}_ndvi_{int(target_epsg)}.tif"
+    # fmk_local  = work_dir / f"lztmre_{tile}_{date}_ffmask_{int(target_epsg)}.tif"
+    # print(f"[DEBUG] -- ndvi_local: {ndvi_local}")
+    # print(f"[DEBUG] -- fmk_local:  {fmk_local}")
+
+    # local staging filenames (native EPSG in name so it doesn't lie)
+    # ndvi_local = work_dir / f"sl{platform[1:]}olre_{tile}_{date}_ga1-clr_e{native_epsg}.tif"
+    # fmk_local  = work_dir / f"sl{platform[1:]}olre_{tile}_{date}_ga2_e{native_epsg}.tif"
+    ndvi_local = work_dir / f"sl{platform[1:]}olre_{tile}_{date}_ga1-clr_e{int(target_epsg)}.tif"
+    fmk_local  = work_dir / f"sl{platform[1:]}olre_{tile}_{date}_ga2_e{int(target_epsg)}.tif"
     print(f"[DEBUG] -- ndvi_local: {ndvi_local}")
-    print(f"[DEBUG] -- fmk_local:  {fmk_local}")
+    print(f"[DEBUG] -- fmk_local : {fmk_local}")
 
     # write Cloud Optimised GeoTIFFs (COGs)
     write_cog_float32(ndvi, out_path=str(ndvi_local), nodata=-9999.0)
@@ -246,6 +301,8 @@ def process_scene_to_s3(
     print(f"[OK] NDVI   -> s3://{bucket}/{ndvi_key}")
     print(f"[OK] FFMASK -> s3://{bucket}/{ffmask_key}")
 
+    # import sys
+    # sys.exit("shut it down")
     # optional local cleanup
     if not rebase:
         try:

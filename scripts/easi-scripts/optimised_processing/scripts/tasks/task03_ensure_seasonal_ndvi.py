@@ -94,8 +94,22 @@ def ensure_seasonal_ndvi_in_s3(
         target_epsg = int(row.target_epsg)
 
         out_dir = f"{prefix.rstrip('/')}/tiles/{tile}/ndvi/{platform}/{yyyymmdd[:4]}/{yyyymmdd}"
-        ndvi_key = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ndvi_{target_epsg}.tif"
-        fmk_key = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ffmask_{target_epsg}.tif"
+        ndvi_key = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ndvi_e{target_epsg}.tif"
+        fmk_key = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ffmask_e{target_epsg}.tif"
+
+        print("out_dir: ", out_dir)
+        print("ndvi_key: ", ndvi_key)
+        print("fmk_key : ", fmk_key)
+
+        out_dir = f"{prefix.rstrip('/')}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymmdd}"
+        ndvi_key = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga1-clr_e{target_epsg}.tif"
+        fmk_key = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga2_e{target_epsg}.tif"
+
+        print("out_dir: ", out_dir)
+        print("ndvi_key: ", ndvi_key)
+        print("fmk_key : ", fmk_key)
+        # import sys
+        # sys.exit("print ndvi file names")
 
         if not rebase:
             if s3_key_exists(bucket, ndvi_key) and s3_key_exists(bucket, fmk_key):
@@ -105,7 +119,7 @@ def ensure_seasonal_ndvi_in_s3(
             print(f"[DRY] NDVI {tile} {platform} {yyyymmdd} -> s3://{bucket}/{ndvi_key}")
             continue
 
-        process_scene_to_s3(
+        result = process_scene_to_s3(
             tile=tile,
             date=yyyymmdd,
             platform=platform,
@@ -124,3 +138,6 @@ def ensure_seasonal_ndvi_in_s3(
             rebase=bool(rebase),
             dask_chunk=int(dask_chunk),
         )
+
+        if result is None:
+            continue

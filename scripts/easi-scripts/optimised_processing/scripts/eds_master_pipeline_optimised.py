@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import math
+import re
+from pathlib import Path
+from osgeo import gdal
 
 from tasks.task02_resolve_sr_dates import resolve_sr_start_end
 from tasks.task03_ensure_seasonal_ndvi import build_seasonal_ndvi_plan, ensure_seasonal_ndvi_in_s3
-from tasks.task04_build_db8_sr_composite import build_db8_sr_to_s3
-from tasks.task07_stage_dc4_locally import stage_dc4_ndvi_locally
+from tasks.task04_build_ga0_sr_composite import build_ga0_sr_to_s3
+from tasks.task07_stage_ga1_locally import stage_ga1_ndvi_locally
 from tasks.task05_run_legacy_method import run_legacy_ndvi_window
 from tasks.task06_convert_and_upload_outputs import convert_outputs_to_cog_and_upload
 from tasks.task08_masks_and_vectors import make_masks_and_vectors
@@ -19,8 +23,8 @@ This pipeline is meant to replace the older "eds_processing" script for the
 processing stage, but still keep the old logic basically the same.
 
 Key ideas
-- Reuse NDVI (dc4) COGs that are already in S3 (made by optimised_ndvi).
-- Only build the start/end SR stacks (db8) that we actually need for the dates.
+- Reuse NDVI (ga1) COGs that are already in S3 (made by optimised_ndvi).
+- Only build the start/end SR stacks (ga0) that we actually need for the dates.
 - Run the legacy seasonal-window method (same thresholds/logic, not rewriting it).
 - Convert the old outputs to Cloud-Optimised GeoTIFFs (COGs) and push to S3.
 
@@ -83,7 +87,7 @@ def parse_args():
     ap.add_argument(
         "--copy-to-home",
         action="store_true",
-        help="Copy db8 + outputs + masks + shapefiles to a folder under /home/jovyan for easy retrieval.",
+        help="Copy ga0 + outputs + masks + shapefiles to a folder under /home/jovyan for easy retrieval.",
         )
     ap.add_argument(
         "--home-out-dir",
@@ -113,8 +117,7 @@ def parse_args():
 
 
 
-from pathlib import Path
-from osgeo import gdal
+
 
 def _prefer_unmasked_sr(sr_path: str) -> str:
     """
@@ -158,6 +161,75 @@ def _norm_yyyymmdd(iso: str) -> str:
     return f'{y}{m}{d}'
 
 
+
+
+def _extract_epsg(value) -> int | None:
+    if value is None:
+        return None
+
+    if isinstance(value, int):
+        return value
+
+    s = str(value).strip()
+    if not s:
+        return None
+
+    if s.isdigit():
+        return int(s)
+
+    m = re.search(r"EPSG[:= ]*(\d+)", s, flags=re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    m = re.search(r"\b(\d{4,6})\b", s)
+    if m:
+        return int(m.group(1))
+
+    return None
+
+
+def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
+    zone = int(math.floor((lon + 180.0) / 6.0) + 1)
+    if lat >= 0:
+        return 32600 + zone
+    return 32700 + zone
+
+def resolve_output_epsg_from_row(row, cli_target_epsg: int) -> int:
+    """
+    Priority:
+      1. explicit CLI override
+      2. derive WGS84 UTM from bbox centre
+      3. fallback to existing EPSG-like fields if bbox missing
+    """
+    if cli_target_epsg and int(cli_target_epsg) > 0:
+        return int(cli_target_epsg)
+
+    def _row_get(r, key, default=None):
+        try:
+            if hasattr(r, "__contains__") and key in r:
+                return r[key]
+        except Exception:
+            pass
+        return getattr(r, key, default)
+
+    lon_min = _row_get(row, "lon_min")
+    lon_max = _row_get(row, "lon_max")
+    lat_min = _row_get(row, "lat_min")
+    lat_max = _row_get(row, "lat_max")
+
+    if None not in (lon_min, lon_max, lat_min, lat_max):
+        centre_lon = (float(lon_min) + float(lon_max)) / 2.0
+        centre_lat = (float(lat_min) + float(lat_max)) / 2.0
+        return derive_target_epsg_wgs84_utm_from_lonlat(centre_lon, centre_lat)
+
+    for attr in ["target_epsg", "native_epsg", "epsg", "crs_epsg", "crs"]:
+        epsg = _extract_epsg(_row_get(row, attr))
+        if epsg:
+            return epsg
+
+    raise ValueError("Could not resolve target EPSG from row")
+
+
 def main():
     args = parse_args()
     tile = args.tile.lower().strip()
@@ -169,9 +241,21 @@ def main():
 
     run_tag = args.run_tag or f'{tile}_d{sd}{ed}'
 
+    # import sys
+    # sys.exit("stop here....")
+
     # ------------------------------------------------------------
     # 1) Resolve SR start/end dates (cloud metadata <= cloud_max)
     # ------------------------------------------------------------
+    # sr = resolve_sr_start_end(
+    #     tile=tile,
+    #     tile_shp=args.tile_shp,
+    #     products=args.sr_products,
+    #     cloud_max=float(args.cloud_max),
+    #     start_date=args.start_date,
+    #     end_date=args.end_date,
+    #     target_epsg=int(args.target_epsg),
+    # )
     sr = resolve_sr_start_end(
         tile=tile,
         tile_shp=args.tile_shp,
@@ -179,8 +263,18 @@ def main():
         cloud_max=float(args.cloud_max),
         start_date=args.start_date,
         end_date=args.end_date,
-        target_epsg=int(args.target_epsg),
     )
+
+    # Force final output EPSG policy here:
+    # explicit CLI override, otherwise WGS84 UTM from bbox centre.
+    sr_start_epsg = resolve_output_epsg_from_row(sr.start_row, args.target_epsg)
+    sr_end_epsg = resolve_output_epsg_from_row(sr.end_row, args.target_epsg)
+
+    sr.start_row["target_epsg"] = int(sr_start_epsg)
+    sr.end_row["target_epsg"] = int(sr_end_epsg)
+
+    print(f"[INFO] Forced SR start target_epsg: {sr_start_epsg}")
+    print(f"[INFO] Forced SR end   target_epsg: {sr_end_epsg}")
 
     eff_sd = str(sr.start_row.date)
     eff_ed = str(sr.end_row.date)
@@ -188,9 +282,10 @@ def main():
     print(f"[INFO] Effective SR start: {eff_sd} (product={sr.start_row['product']}, cloud={float(sr.start_row['cloud']):.2f})")
     print(f"[INFO] Effective SR end:   {eff_ed} (product={sr.end_row['product']}, cloud={float(sr.end_row['cloud']):.2f})")
 
-
+    # import sys
+    # sys.exit("stop here....")
     # ------------------------------------------------------------
-    # 2) Build + ensure seasonal NDVI (dc4) in S3 across lookback
+    # 2) Build + ensure seasonal NDVI (ga1) in S3 across lookback
     # ------------------------------------------------------------
     plan = build_seasonal_ndvi_plan(
         tile=tile,
@@ -202,6 +297,22 @@ def main():
         lookback_years=int(args.lookback),
         target_epsg=int(args.target_epsg),
     )
+
+
+    # Force the same EPSG policy onto all required NDVI rows
+    if len(plan.required_rows) > 0:
+        plan.required_rows["target_epsg"] = plan.required_rows.apply(
+            lambda r: derive_target_epsg_wgs84_utm_from_lonlat(
+                (float(r["lon_min"]) + float(r["lon_max"])) / 2.0,
+                (float(r["lat_min"]) + float(r["lat_max"])) / 2.0,
+            ) if not (args.target_epsg and int(args.target_epsg) > 0)
+            else int(args.target_epsg),
+            axis=1,
+        )
+
+    print("[DEBUG] NDVI plan target_epsg sample:")
+    print(plan.required_rows[["date", "platform", "target_epsg"]].head())
+
 
     print(f'[INFO] Seasonal window: {plan.window.window_start_mmdd} -> {plan.window.window_end_mmdd} (months {plan.window.months_hint()})')
     print(f'[INFO] NDVI scenes in seasonal plan: {len(plan.required_rows)}')
@@ -219,6 +330,8 @@ def main():
         dask_chunk=int(args.chunk),
     )
 
+    # import sys
+    # sys.exit("stop here....")
     # Stage required NDVI locally for the legacy method
     required_dates = []
     for r in plan.required_rows.itertuples(index=False):
@@ -226,12 +339,14 @@ def main():
 
 
     if args.dry_run:
-        print('[DRY] Skipping dc4 NDVI staging (download).')
-        print('[DRY] Skipping db8 SR build.')
+        print('[DRY] Skipping ga1 NDVI staging (download).')
+        print('[DRY] Skipping ga0 SR build.')
         print('[DRY] Skipping legacy method run + output conversion.')
         return
 
-    dc4_dir = stage_dc4_ndvi_locally(
+    # import sys
+    # sys.exit("task 7 start....")
+    ga1_dir = stage_ga1_ndvi_locally(
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
         tile=tile,
@@ -244,9 +359,9 @@ def main():
 
 
     # ------------------------------------------------------------
-    # 3) Build db8 SR composites for start/end
+    # 3) Build ga0 SR composites for start/end
     # ------------------------------------------------------------
-    db8_start = build_db8_sr_to_s3(
+    ga0_start = build_ga0_sr_to_s3(
         tile=tile,
         date=eff_sd,
         platform=str(sr.start_row["platform"]),
@@ -259,15 +374,16 @@ def main():
         cloud_max=float(args.cloud_max),
         bucket=args.s3_bucket,
         s3_prefix=args.s3_prefix,
-        work_dir=work_dir / 'db8_work',
+        work_dir=work_dir / 'ga0_work',
         resolution=float(args.resolution),
         dask_chunk=int(args.chunk),
         rebase=bool(args.rebase),
         dry_run=bool(args.dry_run),
     )
 
-
-    db8_end = build_db8_sr_to_s3(
+    # import sys
+    # sys.exit("stop here after Build ga0 SR composites...")
+    ga0_end = build_ga0_sr_to_s3(
         tile=tile,
         date=eff_ed,
         platform=str(sr.end_row["platform"]),
@@ -280,7 +396,7 @@ def main():
         cloud_max=float(args.cloud_max),
         bucket=args.s3_bucket,
         s3_prefix=args.s3_prefix,
-        work_dir=work_dir / 'db8_work',
+        work_dir=work_dir / 'ga0_work',
         resolution=float(args.resolution),
         dask_chunk=int(args.chunk),
         rebase=bool(args.rebase),
@@ -289,99 +405,75 @@ def main():
 
 
 
-    # # ------------------------------------------------------------
-    # # 4) Run legacy method + convert outputs to COG
-    # # ------------------------------------------------------------
-    # # if args.dry_run:
-    # #     print('[DRY] Skipping legacy method run + output conversion.')
-    # #     return
+    print("ga0_start.local_clr_path:", ga0_start.local_clr_path)
+    print("ga0_start exists:", Path(ga0_start.local_clr_path).exists())
 
-    # outputs = run_legacy_ndvi_window(
-    #     methods_dir=Path(__file__).parent / 'methods',
-    #     scene=tile,
-    #     start_date=eff_sd,
-    #     end_date=eff_ed,
-    #     dc4_glob=str(dc4_dir / '*.tif'),
-    #     start_db8=str(db8_start.local_path),
-    #     end_db8=str(db8_end.local_path),
-    #     window_start_mmdd=plan.window.window_start_mmdd,
-    #     window_end_mmdd=plan.window.window_end_mmdd,
-    #     lookback=int(args.lookback),
-    #     diagnostics=bool(args.diagnostics),
-    #     verbose=bool(args.verbose),
-    #     vi_tag='vi-ndvi',
-    # )
+    print("ga0_end.local_clr_path:", ga0_end.local_clr_path)
+    print("ga0_end exists:", Path(ga0_end.local_clr_path).exists())
 
-
-    # # ------------------------------------------------------------
-    # # 4) Run legacy method + convert outputs to COG
-    # # ------------------------------------------------------------
-    # # if args.dry_run:
-    # #     print('[DRY] Skipping legacy method run + output conversion.')
-    # #     return
-
-    # outputs = run_legacy_ndvi_window(
-    #     methods_dir=Path(__file__).parent / 'methods',
-    #     scene=tile,
-    #     start_date=eff_sd,
-    #     end_date=eff_ed,
-    #     dc4_glob=str(dc4_dir / '*.tif'),
-    #     start_db8=str(db8_start.local_path),
-    #     end_db8=str(db8_end.local_path),
-    #     window_start_mmdd=plan.window.window_start_mmdd,
-    #     window_end_mmdd=plan.window.window_end_mmdd,
-    #     lookback=int(args.lookback),
-    #     diagnostics=bool(args.diagnostics),
-    #     verbose=bool(args.verbose),
-    #     vi_tag='vi-ndvi',
-    # )
+    # import sys
+    # sys.exit("forced stop GA all")
 
     # ------------------------------------------------------------
-    # 4) (NEW) Export unmasked SR (db8) as COGs (start/end)
+    # 4) (NEW) Export unmasked SR (ga0) as COGs (start/end)
     # ------------------------------------------------------------
-    if args.export_sr_raw_cog:
-        sr_raw_dir = work_dir / args.export_sr_raw_cog_dirname  # e.g. <work>/<tile>/sr_raw_cog
+    # if args.export_sr_raw_cog:
+    #     sr_raw_dir = work_dir / args.export_sr_raw_cog_dirname  # e.g. <work>/<tile>/sr_raw_cog
 
-        # These are the SR composites you already built (db8)
-        sr_start_path = str(db8_start.local_path)
-        sr_end_path   = str(db8_end.local_path)
+    #     # These are the SR composites you already built (ga0)
+    #     sr_start_path = str(ga0_start.local_path)
+    #     sr_end_path   = str(ga0_end.local_path)
 
-        raw_start = _prefer_unmasked_sr(sr_start_path)
-        raw_end   = _prefer_unmasked_sr(sr_end_path)
+    #     raw_start = _prefer_unmasked_sr(sr_start_path)
+    #     raw_end   = _prefer_unmasked_sr(sr_end_path)
 
-        start_cog = sr_raw_dir / f"{tile}_{eff_sd}_sr_raw_cog.tif"
-        end_cog   = sr_raw_dir / f"{tile}_{eff_ed}_sr_raw_cog.tif"
+    #     start_cog = sr_raw_dir / f"{tile}_{eff_sd}_sr_raw_cog.tif"
+    #     end_cog   = sr_raw_dir / f"{tile}_{eff_ed}_sr_raw_cog.tif"
 
-        print(f"[SR-RAW-COG] start: {raw_start} -> {start_cog}")
-        print(f"[SR-RAW-COG] end  : {raw_end} -> {end_cog}")
+    #     print(f"[SR-RAW-COG] start: {raw_start} -> {start_cog}")
+    #     print(f"[SR-RAW-COG] end  : {raw_end} -> {end_cog}")
 
-        if not args.dry_run:
-            _write_cog(raw_start, str(start_cog))
-            _write_cog(raw_end, str(end_cog))
+    #     if not args.dry_run:
+    #         _write_cog(raw_start, str(start_cog))
+    #         _write_cog(raw_end, str(end_cog))
 
     # ------------------------------------------------------------
     # 5) Run legacy method + convert outputs to COG
     # ------------------------------------------------------------
+
+    print(f"[INFO] Using start db8 masked stack: {ga0_start.local_clr_path}")
+    print(f"[INFO] Using end   db8 masked stack: {ga0_end.local_clr_path}")
+
     outputs = run_legacy_ndvi_window(
         methods_dir=Path(__file__).parent / 'methods',
         scene=tile,
         start_date=eff_sd,
         end_date=eff_ed,
-        dc4_glob=str(dc4_dir / '*.tif'),
-        start_db8=str(db8_start.local_path),
-        end_db8=str(db8_end.local_path),
+        ga1_glob=str(ga1_dir / '*.tif'),
+        start_ga0=str(ga0_start.local_clr_path),
+        end_ga0=str(ga0_end.local_clr_path),
         window_start_mmdd=plan.window.window_start_mmdd,
         window_end_mmdd=plan.window.window_end_mmdd,
         lookback=int(args.lookback),
         diagnostics=bool(args.diagnostics),
         verbose=bool(args.verbose),
         vi_tag='vi-ndvi',
+        home_out_dir=Path(args.home_out_dir),
     )
 
+    print("eff_sd: ", eff_sd)
+    print("eff_ed: ", eff_ed)
+    print("start_ga0: ", ga0_start.local_clr_path)
+    print("end_ga0: ", ga0_end.local_clr_path)
+
+    # import sys
+    # sys.exit("start and stop date time...")
 
     converted = convert_outputs_to_cog_and_upload(
-        dll_img=outputs.dll_img,
-        dlj_img=outputs.dlj_img,
+        dll_src_img=outputs.dll_src_img,
+        dlj_src_img=outputs.dlj_src_img,
+        dll_final_name=outputs.dll_img,
+        dlj_final_name=outputs.dlj_img,
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
         tile=tile,
@@ -390,6 +482,10 @@ def main():
     )
 
     dljmz_cog_local = Path(converted.dljmz_cog_local)
+
+
+    # import sys
+    # sys.exit("WTF ...")
 
     for u in converted.uploaded:
         print("[OK]", u.s3_uri)
@@ -417,7 +513,8 @@ def main():
     print(f"[OK] Clear  mask -> s3://{args.s3_bucket}/{mv.clear_mask_s3}")
     print(f"[OK] Strong SHP  -> s3://{args.s3_bucket}/{mv.strong_shp_s3_prefix}/")
     print(f"[OK] Clear  SHP  -> s3://{args.s3_bucket}/{mv.clear_shp_s3_prefix}/")
-
+    # import sys
+    # sys.exit("stop here after 5 run legacy...")
     # ------------------------------------------------------------
     # 6) Copy artefacts to /home/jovyan
     # ------------------------------------------------------------
@@ -446,11 +543,23 @@ def main():
             (work_dir / "maskvec_work" / "vectors" / "clear"),
         ]
 
+
+        print("start_ga0: ", ga0_start.local_clr_path)
+        print("end_ga0: ", ga0_end.local_clr_path)
+
+        # print("local_clr_path: ", local_clr_path)
+        # print("local_path: ", local_path)
+
+        # import sys
+        # sys.exit("WTF2 ...")
+
         copy_run_to_home(
         run_tag=run_tag,
         home_out_dir=Path(args.home_out_dir),
-        db8_start_local=Path(db8_start.local_path),
-        db8_end_local=Path(db8_end.local_path),
+        # ga0_start_local=Path(ga0_start.local_path),
+        # ga0_end_local=Path(ga0_end.local_path),
+        ga0_start_local=Path(ga0_start.local_clr_path),
+        ga0_end_local=Path(ga0_end.local_clr_path),
         legacy_outputs=legacy_files,
         cog_outputs=cog_files,
         mask_outputs=mask_files,
@@ -459,8 +568,8 @@ def main():
         dry_run=bool(args.dry_run),
     )
 
-
-
+    # import sys
+    # sys.exit("WTF3 ...")
 
     print("[DONE] Optimised EDS processing complete.")
 

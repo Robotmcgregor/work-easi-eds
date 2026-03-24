@@ -117,6 +117,18 @@ def load_raster(path: str) -> Tuple[np.ndarray, Tuple]:
     ds = None
     return arr, georef
 
+def sanitise_sr_for_log(arr: np.ndarray, nodata: float = -9999.0) -> np.ndarray:
+    """
+    Prepare SR stack for legacy log1p spectral index.
+
+    - convert to float32
+    - replace nodata with NaN
+    - replace values <= -1 with NaN because log1p(x) is invalid for x <= -1
+    """
+    out = arr.astype(np.float32, copy=True)
+    out[out == nodata] = np.nan
+    out[out <= -1] = np.nan
+    return out
 
 def write_envi(
     out_path: str,
@@ -343,6 +355,10 @@ def main(argv=None) -> int:
     # Load SR reflectance
     ref_start, georef = load_raster(start_db8)
     ref_end, _ = load_raster(end_db8)
+
+    # Sanitise SR stacks so nodata/fill values do not break log1p()
+    ref_start = sanitise_sr_for_log(ref_start, nodata=-9999.0)
+    ref_end = sanitise_sr_for_log(ref_end, nodata=-9999.0)
 
     # Load NDVI dc4 images and crop to common shape
     raw_ndvi = []

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-
+import math
 from tasks.task01_inventory_s3 import inventory_existing_outputs
 from tasks.task02_build_scene_manifest import load_or_build_manifest
 from tasks.task03_process_scene_ndvi import process_scene_to_s3
@@ -68,6 +68,67 @@ def parse_args():
 def default_manifest_uri(bucket: str, prefix: str, tile: str) -> str:
     return f"s3://{bucket}/{prefix}/manifests/{tile}_manifest.parquet"
 
+import re
+
+
+def _extract_epsg(value) -> int | None:
+    """
+    Try to extract an EPSG code from values like:
+      32656
+      "32656"
+      "EPSG:32656"
+      "epsg:32656"
+    Returns None if not found.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, int):
+        return value
+
+    s = str(value).strip()
+    if not s:
+        return None
+
+    if s.isdigit():
+        return int(s)
+
+    m = re.search(r"EPSG[:= ]*(\d+)", s, flags=re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    m = re.search(r"\b(\d{4,6})\b", s)
+    if m:
+        return int(m.group(1))
+
+    return None
+
+
+
+def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
+    zone = int(math.floor((lon + 180.0) / 6.0) + 1)
+    if lat >= 0:
+        return 32600 + zone
+    return 32700 + zone
+
+def resolve_output_epsg(row, cli_target_epsg: int) -> int:
+    if cli_target_epsg and int(cli_target_epsg) > 0:
+        return int(cli_target_epsg)
+
+    lon_min = getattr(row, "lon_min", None)
+    lon_max = getattr(row, "lon_max", None)
+    lat_min = getattr(row, "lat_min", None)
+    lat_max = getattr(row, "lat_max", None)
+
+    if None not in (lon_min, lon_max, lat_min, lat_max):
+        centre_lon = (float(lon_min) + float(lon_max)) / 2.0
+        centre_lat = (float(lat_min) + float(lat_max)) / 2.0
+        return derive_target_epsg_wgs84_utm_from_lonlat(centre_lon, centre_lat)
+
+    raise ValueError(
+        f"Could not resolve output EPSG for row date={getattr(row, 'date', 'unknown')} "
+        f"product={getattr(row, 'product', 'unknown')}"
+    )
 
 def main():
     args = parse_args()
@@ -86,6 +147,9 @@ def main():
         tile=tile,
     )
     print(f"[INFO] Existing NDVI outputs found in S3: {len(existing)}")
+    # print("target epsg: ", target_epsg)
+    # import sys
+    # sys.exit("brek run test target manifest...")
 
     # 2) build/load manifest (parquet) from datacube
     manifest_df = load_or_build_manifest(
@@ -100,10 +164,25 @@ def main():
         target_epsg=args.target_epsg,
     )
 
+    # Final output EPSG must be resolved AFTER manifest load.
+    # This prevents stale/cached manifest target_epsg values from leaking into S3 keys.
+    if args.target_epsg and int(args.target_epsg) > 0:
+        manifest_df["target_epsg"] = int(args.target_epsg)
+    else:
+        def _resolve_row_epsg_series(r):
+            centre_lon = (float(r["lon_min"]) + float(r["lon_max"])) / 2.0
+            centre_lat = (float(r["lat_min"]) + float(r["lat_max"])) / 2.0
+            return derive_target_epsg_wgs84_utm_from_lonlat(centre_lon, centre_lat)
+
+        manifest_df["target_epsg"] = manifest_df.apply(_resolve_row_epsg_series, axis=1)
+
     print("[DEBUG] manifest cols:", list(manifest_df.columns))
     print(manifest_df.head(1).to_dict("records"))
 
     print(f"[INFO] Manifest scenes after filtering: {len(manifest_df)}")
+
+    # import sys
+    # sys.exit("Forced stop after manifest")
 
     if args.limit and args.limit > 0:
         manifest_df = manifest_df.head(args.limit).reset_index(drop=True)
@@ -114,12 +193,22 @@ def main():
         yyyymmdd = str(row.date)
         product = str(row.product)
         platform = str(row.platform)
-        target_epsg = int(row.target_epsg)
+        # target_epsg = int(row.target_epsg)
+        target_epsg = resolve_output_epsg(row, args.target_epsg)
+        print("Target epsg: ", target_epsg)
 
+        # import sys
+        # sys.exit("brek run...")
         # output keys
-        out_dir  = f"{args.s3_prefix}/tiles/{tile}/ndvi/{platform}/{yyyymmdd[:4]}/{yyyymmdd}"
-        ndvi_key = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ndvi_{target_epsg}.tif"
-        fmk_key  = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ffmask_{target_epsg}.tif"
+        out_dir  = f"{args.s3_prefix}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymmdd}"
+        ndvi_key = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga1-clr_e{target_epsg}.tif"
+        fmk_key  = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga3_e{target_epsg}.tif"
+
+        print("new output dir: ", out_dir)
+        print("new ndvi_key: ", ndvi_key)
+        print("new fmk_key : ", fmk_key )
+        # import sys
+        # sys.exit("brek run...")
 
         if not args.rebase:
             if s3_key_exists(args.s3_bucket, ndvi_key) and s3_key_exists(args.s3_bucket, fmk_key):

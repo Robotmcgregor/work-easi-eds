@@ -9,7 +9,7 @@ import numpy as np
 from lib.s3_io import s3_uri_exists, download_s3_uri, upload_file_to_s3, parse_s3_uri
 from lib.tile_grid import (
     load_tile_bbox_wgs84,
-    derive_target_epsg_gda94_mga_from_lon,
+    derive_target_epsg_wgs84_utm_from_lonlat,
 )
 
 
@@ -73,10 +73,15 @@ def load_or_build_manifest(
     # 2) build from datacube dataset search (bbox-based)
     lon_min, lat_min, lon_max, lat_max = load_tile_bbox_wgs84(tile_shp=tile_shp, tile=tile)
 
-    # derive MGA zone from bbox centre (unless forced target_epsg)
+    # derive WGS84 UTM zone from bbox centre (unless forced target_epsg)
     if not target_epsg or int(target_epsg) == 0:
         centre_lon = (lon_min + lon_max) / 2.0
-        target_epsg = derive_target_epsg_gda94_mga_from_lon(centre_lon)
+        centre_lat = (lat_min + lat_max) / 2.0
+        target_epsg = derive_target_epsg_wgs84_utm_from_lonlat(centre_lon, centre_lat)
+
+    print("target_epsg: ", target_epsg)
+    # import sys
+    # sys.exit("forced stop epsg")
 
     df = build_manifest_from_datacube_bbox(
         tile=tile,

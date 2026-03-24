@@ -12,197 +12,6 @@ import re
 import datacube
 import numpy as np
 
-# def process_scene_to_s3(
-#     tile: str,
-#     date: str,              # YYYYMMDD
-#     platform: str,
-#     product: str,
-#     lon_min: float,
-#     lat_min: float,
-#     lon_max: float,
-#     lat_max: float,
-#     target_epsg: int,
-#     cloud_max: float,
-#     bucket: str,
-#     ndvi_key: str,
-#     ffmask_key: str,
-#     work_dir: Path,
-#     resolution: float,
-#     rebase: bool,
-#     dask_chunk: int = 2048,
-# ) -> None:
-#     """
-#     Loads nbart_red, nbart_nir, oa_fmask from datacube for one scene date.
-
-#     - Queries by TILE BBOX (WGS84)
-#     - Reprojects to GDA94 MGA (EPSG:283xx)
-#     - Chooses the BEST slice (if multiple datasets returned for the same day) based on max CLEAR%
-#     - Masks using oa_fmask "clear" class for this product (ga_ls8c_ard_3: clear=0 in your test)
-#     - Writes NDVI + FFMASK as Cloud Optimised GeoTIFFs (COGs)
-#     - Uploads outputs to S3 using the provided keys
-#     """
-
-
-#     tile = tile.lower()
-#     work_dir.mkdir(parents=True, exist_ok=True)
-
-#     dc = datacube.Datacube(app="optimised_ndvi_process")
-
-#     # datacube time query wants ISO-ish strings
-#     t0 = f"{date[:4]}-{date[4:6]}-{date[6:]}"
-#     time = (t0, t0)
-
-#     # chunking keeps RAM down and lets cheap nodes run
-#     dask_chunks = {"x": int(dask_chunk), "y": int(dask_chunk)}
-
-#     print(f"[INFO] Loading {tile} {platform} {date} product={product} EPSG:{target_epsg}")
-#     print(f"[DEBUG] lon=({lon_min}, {lon_max}) lat=({lat_min}, {lat_max}) time={time}")
-
-    
-
-#     m = re.fullmatch(r"p(\d{3})r(\d{3})", tile.lower())
-#     path = int(m.group(1))
-#     row  = int(m.group(2))
-#     region_code = f"{path:03d}{row:03d}"   # "115078"
-
-#     def only_this_tile(ds) -> bool:
-#         # region_code is commonly present on DEA ARD datasets
-#         rc = getattr(getattr(ds, "metadata", None), "region_code", None)
-#         if rc is None:
-#             # fallback: parse from the dataset URI/path if needed
-#             try:
-#                 uri = ds.uri if hasattr(ds, "uri") else (ds.uris[0] if hasattr(ds, "uris") else "")
-#                 return f"/{path:03d}/{row:03d}/" in str(uri)
-#             except Exception:
-#                 return False
-#         return str(rc) == region_code
-
-
-#     ds = dc.load(
-#         product=product,
-#         measurements=["nbart_red", "nbart_nir", "oa_fmask"],
-#         time=time,
-#         lon=(float(lon_min), float(lon_max)),
-#         lat=(float(lat_min), float(lat_max)),
-#         output_crs=f"EPSG:{int(target_epsg)}",
-#         resolution=(-float(resolution), float(resolution)),
-#         dask_chunks=dask_chunks,
-#         dataset_predicate=only_this_tile,
-#         skip_broken_datasets=True,
-#     )
-
-#     if ds is None or "time" not in ds.dims or ds.sizes.get("time", 0) == 0:
-#         raise RuntimeError(
-#             f"No data returned by datacube load for tile={tile} product={product} date={date}"
-#         )
-
-#     # ------------------------------------------------------------------
-#     # CLEAR definition:
-#     # Your oa_fmask histogram shows:
-#     #   0 dominates and looks like "valid/clear background",
-#     #   1 is small, 2..5 other classes.
-#     # So for this product in your env: treat CLEAR as 0.
-#     # ------------------------------------------------------------------
-#     CLEAR_VALUES = (0,)
-
-#     # ------------------------------------------------------------------
-#     # If datacube returns multiple time slices for the same day,
-#     # pick the slice with the highest clear% so we don't accidentally
-#     # process a worse (e.g., mostly cloud) dataset.
-#     # IMPORTANT: we must use the SAME chosen slice for red/nir/oa.
-#     # ------------------------------------------------------------------
-#     clear_pct_by_time = ds["oa_fmask"].isin(CLEAR_VALUES).mean(dim=("y", "x")).compute()
-#     best_i = int(clear_pct_by_time.argmax().values)
-#     best_clear_pct = float(clear_pct_by_time.isel(time=best_i).values * 100.0)
-
-#     if ds.sizes.get("time", 1) > 1:
-#         times = [str(t) for t in ds["time"].values]
-#         print(f"[INFO] Multiple slices returned for {date}: n={ds.sizes['time']} -> choosing best_i={best_i}")
-#         print(f"[DEBUG] time coords: {times}")
-#         print(f"[DEBUG] clear% by slice: {[float(x*100.0) for x in clear_pct_by_time.values]}")
-
-#     ds0 = ds.isel(time=best_i)
-
-#     red = ds0["nbart_red"].astype("float32")
-#     nir = ds0["nbart_nir"].astype("float32")
-#     oa  = ds0["oa_fmask"].astype("uint8")
-
-#     # clear mask: True where oa_fmask is "clear"
-#     clear = oa.isin(CLEAR_VALUES)
-
-#     # percent clear for your threshold
-#     # cloud_max=40 => require clear >= 60%
-#     min_clear_pct = 100.0 - float(cloud_max)
-#     clear_pct = best_clear_pct
-
-#     print(f"[INFO] Clear% (oa_fmask in {CLEAR_VALUES}): {clear_pct:.2f}% (min required {min_clear_pct:.2f}%)")
-#     if clear_pct < min_clear_pct:
-#         print(f"[SKIP] Rejected by clear% threshold: {clear_pct:.2f}% < {min_clear_pct:.2f}%")
-#         return
-
-#     # NDVI (avoid divide-by-zero)
-#     denom = (nir + red)
-#     ndvi = (nir - red) / denom.where(denom != 0, other=np.float32(np.nan))
-#     ndvi = ndvi.where(clear, other=np.float32(-9999.0)).astype("float32")
-
-#     # ffmask output as uint8: 1 clear, 0 masked
-#     ffmask = clear.astype("uint8")
-
-#     # local staging filenames (only temporary; uploads go to S3 keys)
-#     ndvi_local = work_dir / f"lztmre_{tile}_{date}_ndvi_{int(target_epsg)}.tif"
-#     fmk_local  = work_dir / f"lztmre_{tile}_{date}_ffmask_{int(target_epsg)}.tif"
-#     print(f"[DEBUG] -- ndvi_local:  {ndvi_local}")
-#     print(f"[DEBUG] -- fmk_local:  {fmk_local}")
-
-#     # ------------------------------------------------------------------
-#     # Ensure CRS metadata survives xarray math
-#     # lib/cog.py requires da.attrs["crs"]
-#     # ------------------------------------------------------------------
-#     crs_val = (
-#         ds.attrs.get("crs")
-#         or ds0.attrs.get("crs")
-#         or ds0["oa_fmask"].attrs.get("crs")
-#         or ds0["nbart_red"].attrs.get("crs")
-#         or ds0["nbart_nir"].attrs.get("crs")
-#     )
-
-#     if not crs_val:
-#         # last-resort: try the common spatial_ref coordinate
-#         try:
-#             # often holds WKT or EPSG-ish info
-#             crs_val = ds0["spatial_ref"].attrs.get("crs_wkt") or ds0["spatial_ref"].attrs.get("wkt")
-#         except Exception:
-#             crs_val = None
-
-#     if not crs_val:
-#         raise RuntimeError(
-#             "Cannot determine CRS for output COG. "
-#             "Tried ds.attrs['crs'], band attrs, and spatial_ref wkt."
-#         )
-
-#     # attach to outputs so cog.py can read it
-#     ndvi.attrs["crs"] = crs_val
-#     ffmask.attrs["crs"] = crs_val
-
-
-#     # write Cloud Optimised GeoTIFFs (COGs)
-#     write_cog_float32(ndvi, out_path=str(ndvi_local), nodata=-9999.0)
-#     write_cog_uint8(ffmask, out_path=str(fmk_local), nodata=0)
-
-#     # upload to S3 using the provided keys (do NOT rewrite keys here)
-#     upload_file_to_s3(str(ndvi_local), bucket=bucket, key=ndvi_key)
-#     upload_file_to_s3(str(fmk_local),  bucket=bucket, key=ffmask_key)
-
-#     print(f"[OK] NDVI   -> s3://{bucket}/{ndvi_key}")
-#     print(f"[OK] FFMASK -> s3://{bucket}/{ffmask_key}")
-
-#     # optional local cleanup (if you want it)
-#     if not rebase:
-#         try:
-#             ndvi_local.unlink(missing_ok=True)
-#             fmk_local.unlink(missing_ok=True)
-#         except Exception:
-#             pass
 
 def process_scene_to_s3(
     tile: str,
@@ -235,7 +44,8 @@ def process_scene_to_s3(
     - Uploads outputs to S3
     """
 
-
+    # import sys
+    # sys.exit("task 3 - break run...")
 
     # these imports should already exist but just assuming they do
     # from lib.cog import write_cog_uint8, write_cog_float32
@@ -287,6 +97,41 @@ def process_scene_to_s3(
         except Exception:
             return False
 
+
+    # ------------------------------------------------------------------
+    # Check data crs
+    # ------------------------------------------------------------------
+
+    # ---- NATIVE DATASET CRS (per-dataset) DEBUG ----
+    dss = dc.find_datasets(
+        product=product,
+        measurements=["nbart_red"],
+        time=time,
+        lon=(float(lon_min), float(lon_max)),
+        lat=(float(lat_min), float(lat_max)),
+    )
+
+    # Apply your predicate manually so you're looking at the exact same tile filtering
+    dss = [d for d in dss if only_this_tile(d)]
+
+    # print("dss: ", dss)
+    # import sys
+    # sys.exit("forces stop debug crs")
+
+    print("\n=== DATASET (NATIVE) CRS DEBUG ===")
+    print(f"datasets found: {len(dss)}")
+    # for i, d in enumerate(dss[:10]):  # cap to avoid spam
+    #     crs = getattr(d, "crs", None)
+    #     epsg = getattr(crs, "epsg", None) if crs is not None else None
+    #     rc = getattr(getattr(d, "metadata", None), "region_code", None)
+    #     print(f"[{i}] region_code={rc} crs={crs} epsg={epsg}")
+    for i, d in enumerate(dss[:10]):  # cap to avoid spam
+        ds_crs = getattr(d, "crs", None)
+        ds_epsg = getattr(ds_crs, "epsg", None) if ds_crs is not None else None
+        rc = getattr(getattr(d, "metadata", None), "region_code", None)
+        print(f"[{i}] region_code={rc} crs={ds_crs} epsg={ds_epsg}")
+    print("==================================\n")
+
     # ------------------------------------------------------------------
     # Load data
     # ------------------------------------------------------------------
@@ -307,6 +152,19 @@ def process_scene_to_s3(
         print("Native dataset CRS:", ds_native.odc.geobox.crs)
         print("Native resolution:", ds_native.odc.geobox.resolution)
         print("========================\n")
+
+    # ds = dc.load(
+    #     product=product,
+    #     measurements=["nbart_red", "nbart_nir", "oa_fmask"],
+    #     time=time,
+    #     lon=(float(lon_min), float(lon_max)),
+    #     lat=(float(lat_min), float(lat_max)),
+    #     output_crs=f"EPSG:{int(target_epsg)}",
+    #     resolution=(-float(resolution), float(resolution)),
+    #     dask_chunks=dask_chunks,
+    #     dataset_predicate=only_this_tile,
+    #     skip_broken_datasets=True,
+    # )
 
 
     ds = dc.load(
@@ -448,16 +306,24 @@ def process_scene_to_s3(
 
     # ------------------------------------------------------------------
     # IMPORTANT: ensure cog.py can determine CRS.
-    # output_crs == EPSG:target_epsg
+    # output_crs == EPSG:epsg
     # ------------------------------------------------------------------
+    # ndvi.attrs["crs"] = f"EPSG:{int(epsg)}"
+    # ffmask.attrs["crs"] = f"EPSG:{int(epsg)}"
+
     ndvi.attrs["crs"] = f"EPSG:{int(target_epsg)}"
     ffmask.attrs["crs"] = f"EPSG:{int(target_epsg)}"
 
-    # local staging filenames
-    ndvi_local = work_dir / f"lztmre_{tile}_{date}_ndvi_{int(target_epsg)}.tif"
-    fmk_local  = work_dir / f"lztmre_{tile}_{date}_ffmask_{int(target_epsg)}.tif"
+    ndvi_local = work_dir / f"sl{platform[1:]}olre_{tile}_{date}_ga1-clr_e{int(target_epsg)}.tif"
+    fmk_local  = work_dir / f"sl{platform[1:]}olre_{tile}_{date}_ga3_e{int(target_epsg)}.tif"
     print(f"[DEBUG] -- ndvi_local: {ndvi_local}")
     print(f"[DEBUG] -- fmk_local:  {fmk_local}")
+
+    print(ndvi_key)
+    print(ffmask_key)
+
+    # import sys
+    # sys.exit("task 3 - break run next upload to s3...")
 
     # write Cloud Optimised GeoTIFFs (COGs)
     write_cog_float32(ndvi, out_path=str(ndvi_local), nodata=-9999.0)

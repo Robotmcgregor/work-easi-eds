@@ -121,6 +121,10 @@ def main():
         ndvi_key = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ndvi_{target_epsg}.tif"
         fmk_key  = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ffmask_{target_epsg}.tif"
 
+
+        # import sys
+        # sys.exit("brek run...")
+
         if not args.rebase:
             if s3_key_exists(args.s3_bucket, ndvi_key) and s3_key_exists(args.s3_bucket, fmk_key):
                 print(f"[SKIP] Exists: s3://{args.s3_bucket}/{ndvi_key}")

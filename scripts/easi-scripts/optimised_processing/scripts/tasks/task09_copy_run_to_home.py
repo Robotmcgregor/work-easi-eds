@@ -35,8 +35,8 @@ def copy_run_to_home(
     *,
     run_tag: str,
     home_out_dir: Path,
-    db8_start_local: Path,
-    db8_end_local: Path,
+    ga0_start_local: Path,
+    ga0_end_local: Path,
     legacy_outputs: Iterable[Path],
     cog_outputs: Iterable[Path],
     mask_outputs: Iterable[Path],
@@ -72,9 +72,9 @@ def copy_run_to_home(
         print(f"[COPY] {p}")
         print(f"       -> {dst}")
 
-    # db8
-    stage_file(Path(db8_start_local), "sr_db8")
-    stage_file(Path(db8_end_local), "sr_db8")
+    # ga0
+    stage_file(Path(ga0_start_local), "sr_ga0")
+    stage_file(Path(ga0_end_local), "sr_ga0")
 
     # legacy .img/.hdr etc
     for p in legacy_outputs:
