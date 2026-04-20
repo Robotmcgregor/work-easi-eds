@@ -52,16 +52,40 @@ def build_seasonal_ndvi_plan(
         app='optimised_processing_ndvi_manifest',
     )
 
+    # Keep all candidate scenes from the lookback period up to the END year,
+    # not just up to the START year. This allows cross-year runs such as:
+    #   start = 20250607
+    #   end   = 20260125
+    # to retain valid 2026 scenes in the manifest.
     start_year = int(start_yyyymmdd[:4])
+    end_year = int(end_yyyymmdd[:4])
     min_year = start_year - int(lookback_years)
 
-    df = df[(df['date'].astype(str).str[:4].astype(int) >= min_year) & (df['date'].astype(str).str[:4].astype(int) <= start_year)]
+    years = df['date'].astype(str).str[:4].astype(int)
+    df = df[(years >= min_year) & (years <= end_year)].copy()
 
-    # keep only dates in seasonal window
-    df = df[df['date'].apply(lambda d: window.in_window(str(d)))]
+    print("[DEBUG] start_yyyymmdd:", start_yyyymmdd)
+    print("[DEBUG] end_yyyymmdd  :", end_yyyymmdd)
+    print("[DEBUG] start_year    :", start_year)
+    print("[DEBUG] end_year      :", end_year)
+    print("[DEBUG] min_year      :", min_year)
+    print("[DEBUG] years after year filter:", sorted(years[(years >= min_year) & (years <= end_year)].unique().tolist()))
 
-    # sort
+    # Keep only dates inside the seasonal window
+    df = df[df['date'].apply(lambda d: window.in_window(str(d)))].copy()
+
+    print("[DEBUG] rows after window filter:")
+    if df.empty:
+        print("   <none>")
+    else:
+        print(df[['date', 'platform', 'product', 'target_epsg']].sort_values(['date', 'platform', 'product']).to_string(index=False))
+
+    # Sort for stable downstream processing
     df = df.sort_values(['date', 'platform', 'product']).reset_index(drop=True)
+    # print("df: ", df)
+
+    # import sys
+    # sys.exit("checking for 2026 data")
 
     return SeasonalNDVIPlan(window=window, required_rows=df)
 
@@ -111,10 +135,22 @@ def ensure_seasonal_ndvi_in_s3(
         # import sys
         # sys.exit("print ndvi file names")
 
-        if not rebase:
-            if s3_key_exists(bucket, ndvi_key) and s3_key_exists(bucket, fmk_key):
-                continue
+        print(f"[DEBUG] checking S3 for {yyyymmdd} {platform}")
+        print(f"[DEBUG] ndvi_key = s3://{bucket}/{ndvi_key}")
+        print(f"[DEBUG] fmk_key  = s3://{bucket}/{fmk_key}")
 
+        # if not rebase:
+        #     if s3_key_exists(bucket, ndvi_key) and s3_key_exists(bucket, fmk_key):
+        #         continue
+        ndvi_exists = s3_key_exists(bucket, ndvi_key)
+        fmk_exists = s3_key_exists(bucket, fmk_key)
+
+        print(f"[DEBUG] ndvi_exists={ndvi_exists} fmk_exists={fmk_exists}")
+
+        if not rebase:
+            if ndvi_exists and fmk_exists:
+                print(f"[DEBUG] already present in S3, skipping {yyyymmdd} {platform}")
+                continue
         if dry_run:
             print(f"[DRY] NDVI {tile} {platform} {yyyymmdd} -> s3://{bucket}/{ndvi_key}")
             continue

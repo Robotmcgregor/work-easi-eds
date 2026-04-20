@@ -466,26 +466,26 @@ def main():
     print("start_ga0: ", ga0_start.local_clr_path)
     print("end_ga0: ", ga0_end.local_clr_path)
 
-    # import sys
-    # sys.exit("start and stop date time...")
+    import sys
+    sys.exit("start and stop date time...")
 
     converted = convert_outputs_to_cog_and_upload(
-        dll_src_img=outputs.dll_src_img,
-        dlj_src_img=outputs.dlj_src_img,
+        dll_src_img=outputs.dll_img,
+        dlj_src_img=outputs.dlj_img,
         dll_final_name=outputs.dll_img,
         dlj_final_name=outputs.dlj_img,
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
         tile=tile,
-        run_tag=run_tag,
-        work_dir=work_dir / "outputs",
+        run_tag=f"d{eff_sd}{eff_ed}", 
+        work_dir=scene_work_dir / "outputs_cog",
     )
 
     dljmz_cog_local = Path(converted.dljmz_cog_local)
 
 
-    # import sys
-    # sys.exit("WTF ...")
+    import sys
+    sys.exit("WTF ...")
 
     for u in converted.uploaded:
         print("[OK]", u.s3_uri)

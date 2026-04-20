@@ -24,6 +24,13 @@ def stage_ga1_ndvi_locally(
     out_dir = work_dir / "ga1_ndvi"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    print("[DEBUG] required_dates passed to stage_ga1_ndvi_locally:")
+    for item in required_dates:
+        print("   ", item)
+
+    # import sys
+    # sys.exit("2026 missing")
+
     for yyyymmdd, platform, epsg in required_dates:
         platform_str = str(platform).strip().lower()
 

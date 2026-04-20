@@ -50,7 +50,15 @@ def convert_outputs_to_cog_and_upload(
     run_tag: str,
     work_dir: Path,
 ) -> ConvertedOutputs:
-    """Convert legacy ENVI outputs to final named COG GeoTIFFs and upload to S3."""
+    """
+    Convert outputs to final named COG GeoTIFFs and upload to S3.
+
+    Supports either:
+    - legacy ENVI .img inputs, or
+    - already-written GeoTIFF inputs.
+
+    If the source is already a GeoTIFF, it skips ENVI conversion and just COGifies it.
+    """
     tile = tile.lower().strip()
 
     work_dir = Path(work_dir)
@@ -68,27 +76,41 @@ def convert_outputs_to_cog_and_upload(
 
     for src, final_name, product in items:
         if not src.exists():
-            raise FileNotFoundError(f"Missing expected legacy source output: {src}")
+            raise FileNotFoundError(f"Missing expected source output: {src}")
 
-        raw_tif = work_dir / f"{src.stem}.tif"
         cog_tif = work_dir / final_name.name
 
-        _envi_img_to_tif(src, raw_tif)
-        to_cog(str(raw_tif), str(cog_tif), overwrite=True)
+        # If source is already a GeoTIFF, skip ENVI conversion
+        if src.suffix.lower() in {".tif", ".tiff"}:
+            to_cog(str(src), str(cog_tif), overwrite=True)
+
+        # Otherwise assume legacy ENVI .img and convert first
+        elif src.suffix.lower() == ".img":
+            raw_tif = work_dir / f"{src.stem}.tif"
+            _envi_img_to_tif(src, raw_tif)
+            to_cog(str(raw_tif), str(cog_tif), overwrite=True)
+
+            try:
+                raw_tif.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        else:
+            raise RuntimeError(f"Unsupported source format for output conversion: {src}")
 
         key = f"{prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/{cog_tif.name}"
         upload_file_to_s3(str(cog_tif), bucket=bucket, key=key)
-        uploaded.append(UploadedOutput(local_cog=cog_tif, s3_uri=f"s3://{bucket}/{key}"))
+        uploaded.append(
+            UploadedOutput(
+                local_cog=cog_tif,
+                s3_uri=f"s3://{bucket}/{key}",
+            )
+        )
 
         if product == "dll":
             dllmz_cog_local = cog_tif
         else:
             dljmz_cog_local = cog_tif
-
-        try:
-            raw_tif.unlink(missing_ok=True)
-        except Exception:
-            pass
 
     if dllmz_cog_local is None or dljmz_cog_local is None:
         raise RuntimeError(

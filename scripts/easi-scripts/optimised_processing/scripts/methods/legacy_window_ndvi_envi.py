@@ -130,29 +130,67 @@ def sanitise_sr_for_log(arr: np.ndarray, nodata: float = -9999.0) -> np.ndarray:
     out[out <= -1] = np.nan
     return out
 
-def write_envi(
-    out_path: str,
-    arrays: List[np.ndarray],
-    georef: Tuple,
+# def write_envi(
+#     out_path: str,
+#     arrays: List[np.ndarray],
+#     georef: Tuple,
+#     dtype=gdal.GDT_Byte,
+#     nodata=0,
+# ) -> None:
+#     """Write a multi-band raster in ENVI format."""
+#     gt, proj = georef
+#     ysize, xsize = arrays[0].shape
+#     drv = gdal.GetDriverByName("ENVI")
+#     ds = drv.Create(out_path, xsize, ysize, len(arrays), dtype)
+#     if gt:
+#         ds.SetGeoTransform(gt)
+#     if proj:
+#         ds.SetProjection(proj)
+#     for i, arr in enumerate(arrays, start=1):
+#         band = ds.GetRasterBand(i)
+#         band.WriteArray(arr)
+#         band.SetNoDataValue(nodata)
+#     ds.FlushCache()
+#     ds = None
+def write_gtiff(
+    out_path,
+    arrays,
+    georef,
     dtype=gdal.GDT_Byte,
     nodata=0,
-) -> None:
-    """Write a multi-band raster in ENVI format."""
+):
     gt, proj = georef
+
     ysize, xsize = arrays[0].shape
-    drv = gdal.GetDriverByName("ENVI")
-    ds = drv.Create(out_path, xsize, ysize, len(arrays), dtype)
+
+    drv = gdal.GetDriverByName("GTiff")
+
+    ds = drv.Create(
+        out_path,
+        xsize,
+        ysize,
+        len(arrays),
+        dtype,
+        options=[
+            "COMPRESS=LZW",
+            "TILED=YES",
+            "BIGTIFF=IF_SAFER"
+        ],
+    )
+
     if gt:
         ds.SetGeoTransform(gt)
+
     if proj:
         ds.SetProjection(proj)
+
     for i, arr in enumerate(arrays, start=1):
         band = ds.GetRasterBand(i)
         band.WriteArray(arr)
         band.SetNoDataValue(nodata)
+
     ds.FlushCache()
     ds = None
-
 
 def normalise_ndvi(arr: np.ndarray) -> np.ndarray:
     """
@@ -508,34 +546,255 @@ def main(argv=None) -> int:
         - 4.3794265 * s_test
     ).astype(np.float32)
 
+    # # --------------------------------------------------
+    # # DIAGNOSTIC OUTPUT: raw combined index (UNSTRETCHED)
+    # # --------------------------------------------------
+
+    # out_base = f"lztmre_{scene}_d{sd}{ed}_{args.vi_tag}"
+    # diag_dir = Path(stdProjFilename(f"{out_base}_dllmz.img")).parent / "diagnostics"
+
+    # print("diag dir: ", diag_dir)
+    # diag_dir.mkdir(exist_ok=True)
+
+    # # diag_name = f"{args.scene}_d{sd}"
+
+    # # combined_img = diag_dir / f"lztmre_{scene}_{sd}{ed}_combined_raw.img"
+
+    # # # combined_out = stdProjFilename(
+    # # #     f"lztmre_{scene}_{sd}_combined_raw.img"
+    # # # )
+
+    # # write_envi(
+    # #     combined_img,
+    # #     [combined_index],
+    # #     georef,
+    # #     dtype=gdal.GDT_Float32,
+    # #     nodata=0
+    # # )
+    # combined_img = diag_dir / f"{platform}olre_{tile}_d{sd}{ed}_combined_raw_e{epsg}.tif"
+
+    # write_gtiff(
+    #     str(combined_img),
+    #     [combined_index],
+    #     georef,
+    #     dtype=gdal.GDT_Float32,
+    #     nodata=0,
+    # )
+
+    # print("file sent to ", combined_img)
+
+
+    # # In legacy FC:
+    # #  - spectral_term ≈ small, stable
+    # #  - fc_term ≈ bounded (0–100ish)
+    # # → combined values clustered near 20–60
+
+    # # With NDVI:
+    # #  - ndvi_term:
+    # #  - can be negative
+    # #  - can spike strongly
+    # #  - has different variance
+
+    # # → combined values now span –50 to 700+
+
+    # # Clearing decision logic — mirror legacy DLL thresholds
+    # NO_CLEARING = 10
+    # NULL_CLEARING = 0
+    # dll_class = np.full(spectral_index.shape, NO_CLEARING, dtype=np.uint8)
+    # dll_class[combined_index > 21.80] = 34
+    # dll_class[(combined_index > 27.71) & (s_test < -0.27) & (spectral_index < -0.86)] = 35
+    # dll_class[(combined_index > 33.40) & (s_test < -0.60) & (spectral_index < -1.19)] = 36
+    # dll_class[(combined_index > 39.54) & (s_test < -1.01) & (spectral_index < -1.50)] = 37
+    # dll_class[(combined_index > 47.05) & (s_test < -1.55) & (spectral_index < -1.84)] = 38
+    # dll_class[(combined_index > 58.10) & (s_test < -2.34) & (spectral_index < -2.27)] = 39
+
+    # # NDVI-only class 3 (analogous to FPC-only): strong NDVI signal not explained by clearing thresholds
+    # # ndviDiffStdErr = -ndvi_trend * base_stderr - original QLD calculation
+    # # dll_class[(t_test > -1.70) & (ndviDiffStdErr > 740)] = 3
+
+    # # ---- NDVI-only diagnostic metric (standardised change) ----
+    # ndviDiffStdErr = -(ndvi_trend) / np.maximum(base_stderr, 0.2)
+
+    # dll_class[(t_test > -1.70) & (ndviDiffStdErr > 6.0)] = 3   # you can tune this
+
+    # # Output filenames (define early so diagnostics can use them)
+    # # out_base = f"lztmre_{scene}_d{sd}{ed}_{args.vi_tag}"
+    # # dll_path = stdProjFilename(f"{out_base}_dllmz.img")
+    # # dlj_path = stdProjFilename(f"{out_base}_dljmz.img")
+
+    # # NEW NAMING
+    # tile = scene.lower()
+
+    # # derive platform + epsg from end_db8 filename
+    # import re
+    # end_name = os.path.basename(end_db8)
+
+    # m = re.match(r"(sl\d)olre_(p\d+r\d+)_\d{8}_ga0.*_e(\d+)\.tif", end_name)
+
+    # if not m:
+    #     raise RuntimeError(f"Could not parse GA0 filename: {end_name}")
+
+    # platform = m.group(1)
+    # epsg = m.group(3)
+
+    # dll_path = f"{platform}olre_{tile}_d{sd}{ed}_dll_e{epsg}.tif"
+    # dlj_path = f"{platform}olre_{tile}_d{sd}{ed}_dlj_e{epsg}.tif"
+
+
+    # # ------------------ DIAGNOSTICS ------------------
+    # if args.diagnostics:
+    #     diag_mask = (
+    #         np.isfinite(ndviDiffStdErr)
+    #         & (base_stderr >= 0.2)
+    #         & (norm_start > 0)
+    #         & (norm_end > 0)
+    #     )
+    #     vals = ndviDiffStdErr[diag_mask]
+
+    #     diag_dir = Path(stdProjFilename(f"{out_base}_dllmz.img")).parent / "diagnostics"
+
+    #     print("diag dir: ", diag_dir)
+    #     diag_dir.mkdir(exist_ok=True)
+
+    #     diag_name = f"{args.scene}_d{sd}{ed}_{args.vi_tag}"
+
+    #     stats_csv = diag_dir / f"{diag_name}_ndviDiffStdErr_stats.csv"
+    #     bins_csv  = diag_dir / f"{diag_name}_ndviDiffStdErr_bins.csv"
+
+    #     write_diag_stats_csv(vals, stats_csv)
+    #     write_diag_bins_csv(vals, bins_csv, bins=args.diag_bins, clip_abs=args.diag_clip)
+
+    #     print(f"[DIAG] Stats CSV: {stats_csv}")
+    #     print(f"[DIAG] Bins  CSV: {bins_csv}")
+
+    #     # Optional histogram PNG (never crash if matplotlib missing)
+    #     try:
+    #         import matplotlib.pyplot as plt
+
+    #         vclip = np.clip(vals, -args.diag_clip, args.diag_clip)
+    #         plt.figure()
+    #         plt.hist(vclip, bins=args.diag_bins)
+    #         plt.axvline(2.5, linestyle="--")
+    #         plt.axvline(-2.5, linestyle="--")
+    #         plt.title("ndviDiffStdErr histogram (clipped)")
+    #         png_path = diag_dir / f"{diag_name}_ndviDiffStdErr.png"
+    #         plt.savefig(png_path, dpi=150, bbox_inches="tight")
+    #         plt.close()
+    #         print(f"[DIAG] Histogram PNG: {png_path}")
+    #     except Exception as e:
+    #         print(f"[DIAG] Histogram skipped (matplotlib unavailable): {e}")
+    # # ------------------ /DIAGNOSTICS ------------------
+
+
+    # # Optional: force no-clearing where starting NDVI is very low
+    # if not args.omit_ndvi_start_threshold:
+    #     dll_class[norm_start < 108] = NO_CLEARING
+
+    # # Interpretation (DLJ): stretch indices to uint8
+    # # Interpretation layers & clearing probability — legacy-style
+    # spectralMean = float(np.mean(spectral_index[spectral_index != 0])) if np.any(spectral_index != 0) else 0.0
+    # spectralStd  = float(np.std(spectral_index[spectral_index != 0])) if np.any(spectral_index != 0) else 1.0
+    # sTestMean    = float(np.mean(s_test[s_test != 0])) if np.any(s_test != 0) else 0.0
+    # sTestStd     = float(np.std(s_test[s_test != 0])) if np.any(s_test != 0) else 1.0
+    # combMean     = float(np.mean(combined_index[combined_index != 0])) if np.any(combined_index != 0) else 0.0
+    # combStd      = float(np.std(combined_index[combined_index != 0])) if np.any(combined_index != 0) else 1.0
+
+    # spectral_stretch = stretch(spectral_index, spectralMean, spectralStd, 2, 1, 255, 0)
+    # trend_stretch     = stretch(s_test, sTestMean, sTestStd, 10, 1, 255, 0)
+    # combined_stretch  = stretch(combined_index, combMean, combStd, 10, 1, 255, 0)
+
+    # clearing_prob = 200 * (1 - np.exp(-((0.01227 * combined_index) ** 3.18975)))
+    # clearing_prob = np.round(clearing_prob).astype(np.uint8)
+    # clearing_prob[combined_index <= 0] = 0
+
+    # # Output filenames
+    # # Include the tile (scene) and the process used (vi=ndvi) in output names for traceability
+    # # out_base = f"lztmre_{scene}_d{sd}{ed}_vi-ndvi"
+    # # dll_path = stdProjFilename(f"{out_base}_dllmz.img")
+    # # dlj_path = stdProjFilename(f"{out_base}_dljmz.img")
+
+    # if args.verbose:
+    #     print(f"[Output] DLL: {dll_path}")
+    #     print(f"[Output] DLJ: {dlj_path}")
+
+    # # Write outputs
+    # # write_envi(dll_path, [dll_class], georef, dtype=gdal.GDT_Byte)
+    # # write_envi(dlj_path, [spectral_stretch, trend_stretch, combined_stretch, clearing_prob], georef, dtype=gdal.GDT_Byte)
+
+    # write_gtiff(dll_path, [dll_class], georef)
+
+    # write_gtiff(
+    #     dlj_path,
+    #     [spectral_stretch, trend_stretch, combined_stretch, clearing_prob],
+    #     georef
+    # )
+    # # Lightweight JSON provenance log for traceability
+    # try:
+    #     import json
+    #     log = {
+    #         "scene": scene,
+    #         "start_date": sd,
+    #         "end_date": ed,
+    #         "process": "vi-ndvi",
+    #         "window_start": ws,
+    #         "window_end": we,
+    #         "lookback_years": args.lookback,
+    #         "baseline_dates": baseline_dates,
+    #         "start_ndvi_date": start_ndvi_date,
+    #         "end_ndvi_date": end_ndvi_date,
+    #         "outputs": {
+    #             "dll": dll_path,
+    #             "dlj": dlj_path
+    #         }
+    #     }
+    #     log_path = os.path.splitext(dll_path)[0] + "_log.json"
+    #     with open(log_path, "w", encoding="utf-8") as f:
+    #         json.dump(log, f, indent=2)
+    #     if args.verbose:
+    #         print(f"[Output] LOG: {log_path}")
+    # except Exception as e:
+    #     print(f"[WARN] Failed to write log JSON: {e}")
+
+    # print(f"[OK] Completed: {dll_path}, {dlj_path}")
+    # return 0
+
+    
+    # --------------------------------------------------
+    # Derive final output naming once from end_db8
+    # --------------------------------------------------
+    tile = scene.lower()
+
+    import re
+    end_name = os.path.basename(end_db8)
+
+    m = re.match(r"(sl\d)olre_(p\d+r\d+)_\d{8}_ga0.*_e(\d+)\.tif", end_name)
+    if not m:
+        raise RuntimeError(f"Could not parse GA0 filename: {end_name}")
+
+    platform = m.group(1)   # e.g. sl8
+    epsg = m.group(3)       # e.g. 32756
+
+    dll_path = f"{platform}olre_{tile}_d{sd}{ed}_dll_e{epsg}.tif"
+    dlj_path = f"{platform}olre_{tile}_d{sd}{ed}_dlj_e{epsg}.tif"
+
     # --------------------------------------------------
     # DIAGNOSTIC OUTPUT: raw combined index (UNSTRETCHED)
     # --------------------------------------------------
-
-    out_base = f"lztmre_{scene}_d{sd}{ed}_{args.vi_tag}"
-    diag_dir = Path(stdProjFilename(f"{out_base}_dllmz.img")).parent / "diagnostics"
-
+    diag_dir = Path.cwd() / "diagnostics"
     print("diag dir: ", diag_dir)
     diag_dir.mkdir(exist_ok=True)
 
-    # diag_name = f"{args.scene}_d{sd}"
+    combined_img = diag_dir / f"{platform}olre_{tile}_d{sd}{ed}_combined_raw_e{epsg}.tif"
 
-    combined_img = diag_dir / f"lztmre_{scene}_{sd}{ed}_combined_raw.img"
-
-    # combined_out = stdProjFilename(
-    #     f"lztmre_{scene}_{sd}_combined_raw.img"
-    # )
-
-    write_envi(
-        combined_img,
+    write_gtiff(
+        str(combined_img),
         [combined_index],
         georef,
         dtype=gdal.GDT_Float32,
-        nodata=0
+        nodata=0,
     )
 
     print("file sent to ", combined_img)
-
 
     # In legacy FC:
     #  - spectral_term ≈ small, stable
@@ -561,20 +820,9 @@ def main(argv=None) -> int:
     dll_class[(combined_index > 47.05) & (s_test < -1.55) & (spectral_index < -1.84)] = 38
     dll_class[(combined_index > 58.10) & (s_test < -2.34) & (spectral_index < -2.27)] = 39
 
-    # NDVI-only class 3 (analogous to FPC-only): strong NDVI signal not explained by clearing thresholds
-    # ndviDiffStdErr = -ndvi_trend * base_stderr - original QLD calculation
-    # dll_class[(t_test > -1.70) & (ndviDiffStdErr > 740)] = 3
-
-    # ---- NDVI-only diagnostic metric (standardised change) ----
+    # NDVI-only diagnostic metric (standardised change)
     ndviDiffStdErr = -(ndvi_trend) / np.maximum(base_stderr, 0.2)
-
-    dll_class[(t_test > -1.70) & (ndviDiffStdErr > 6.0)] = 3   # you can tune this
-
-    # Output filenames (define early so diagnostics can use them)
-    out_base = f"lztmre_{scene}_d{sd}{ed}_{args.vi_tag}"
-    dll_path = stdProjFilename(f"{out_base}_dllmz.img")
-    dlj_path = stdProjFilename(f"{out_base}_dljmz.img")
-
+    dll_class[(t_test > -1.70) & (ndviDiffStdErr > 6.0)] = 3
 
     # ------------------ DIAGNOSTICS ------------------
     if args.diagnostics:
@@ -586,12 +834,11 @@ def main(argv=None) -> int:
         )
         vals = ndviDiffStdErr[diag_mask]
 
-        diag_dir = Path(stdProjFilename(f"{out_base}_dllmz.img")).parent / "diagnostics"
-
+        diag_dir = Path.cwd() / "diagnostics"
         print("diag dir: ", diag_dir)
         diag_dir.mkdir(exist_ok=True)
 
-        diag_name = f"{args.scene}_d{sd}{ed}_{args.vi_tag}"
+        diag_name = f"{platform}olre_{tile}_d{sd}{ed}_{args.vi_tag}_e{epsg}"
 
         stats_csv = diag_dir / f"{diag_name}_ndviDiffStdErr_stats.csv"
         bins_csv  = diag_dir / f"{diag_name}_ndviDiffStdErr_bins.csv"
@@ -602,7 +849,6 @@ def main(argv=None) -> int:
         print(f"[DIAG] Stats CSV: {stats_csv}")
         print(f"[DIAG] Bins  CSV: {bins_csv}")
 
-        # Optional histogram PNG (never crash if matplotlib missing)
         try:
             import matplotlib.pyplot as plt
 
@@ -620,13 +866,11 @@ def main(argv=None) -> int:
             print(f"[DIAG] Histogram skipped (matplotlib unavailable): {e}")
     # ------------------ /DIAGNOSTICS ------------------
 
-
     # Optional: force no-clearing where starting NDVI is very low
     if not args.omit_ndvi_start_threshold:
         dll_class[norm_start < 108] = NO_CLEARING
 
     # Interpretation (DLJ): stretch indices to uint8
-    # Interpretation layers & clearing probability — legacy-style
     spectralMean = float(np.mean(spectral_index[spectral_index != 0])) if np.any(spectral_index != 0) else 0.0
     spectralStd  = float(np.std(spectral_index[spectral_index != 0])) if np.any(spectral_index != 0) else 1.0
     sTestMean    = float(np.mean(s_test[s_test != 0])) if np.any(s_test != 0) else 0.0
@@ -635,28 +879,35 @@ def main(argv=None) -> int:
     combStd      = float(np.std(combined_index[combined_index != 0])) if np.any(combined_index != 0) else 1.0
 
     spectral_stretch = stretch(spectral_index, spectralMean, spectralStd, 2, 1, 255, 0)
-    trend_stretch     = stretch(s_test, sTestMean, sTestStd, 10, 1, 255, 0)
-    combined_stretch  = stretch(combined_index, combMean, combStd, 10, 1, 255, 0)
+    trend_stretch    = stretch(s_test, sTestMean, sTestStd, 10, 1, 255, 0)
+    combined_stretch = stretch(combined_index, combMean, combStd, 10, 1, 255, 0)
 
     clearing_prob = 200 * (1 - np.exp(-((0.01227 * combined_index) ** 3.18975)))
     clearing_prob = np.round(clearing_prob).astype(np.uint8)
     clearing_prob[combined_index <= 0] = 0
 
-    # Output filenames
-    # Include the tile (scene) and the process used (vi=ndvi) in output names for traceability
-    # out_base = f"lztmre_{scene}_d{sd}{ed}_vi-ndvi"
-    # dll_path = stdProjFilename(f"{out_base}_dllmz.img")
-    # dlj_path = stdProjFilename(f"{out_base}_dljmz.img")
-
     if args.verbose:
         print(f"[Output] DLL: {dll_path}")
         print(f"[Output] DLJ: {dlj_path}")
 
-    # Write outputs
-    write_envi(dll_path, [dll_class], georef, dtype=gdal.GDT_Byte)
-    write_envi(dlj_path, [spectral_stretch, trend_stretch, combined_stretch, clearing_prob], georef, dtype=gdal.GDT_Byte)
+    # Write outputs directly as GeoTIFF
+    write_gtiff(
+        str(dll_path),
+        [dll_class],
+        georef,
+        dtype=gdal.GDT_Byte,
+        nodata=0,
+    )
 
-    # Lightweight JSON provenance log for traceability
+    write_gtiff(
+        str(dlj_path),
+        [spectral_stretch, trend_stretch, combined_stretch, clearing_prob],
+        georef,
+        dtype=gdal.GDT_Byte,
+        nodata=0,
+    )
+
+    # Lightweight JSON provenance log
     try:
         import json
         log = {
@@ -672,10 +923,10 @@ def main(argv=None) -> int:
             "end_ndvi_date": end_ndvi_date,
             "outputs": {
                 "dll": dll_path,
-                "dlj": dlj_path
-            }
+                "dlj": dlj_path,
+            },
         }
-        log_path = os.path.splitext(dll_path)[0] + "_log.json"
+        log_path = f"{platform}olre_{tile}_d{sd}{ed}_dll_log_e{epsg}.json"
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(log, f, indent=2)
         if args.verbose:
@@ -685,7 +936,6 @@ def main(argv=None) -> int:
 
     print(f"[OK] Completed: {dll_path}, {dlj_path}")
     return 0
-
 
 if __name__ == "__main__":
     import sys
