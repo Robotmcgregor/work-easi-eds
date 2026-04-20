@@ -35,6 +35,8 @@ def copy_run_to_home(
     *,
     run_tag: str,
     home_out_dir: Path,
+    ga0_start_raw_local: Path | None = None,
+    ga0_end_raw_local: Path | None = None,
     ga0_start_local: Path,
     ga0_end_local: Path,
     legacy_outputs: Iterable[Path],
@@ -73,6 +75,10 @@ def copy_run_to_home(
         print(f"       -> {dst}")
 
     # ga0
+    if ga0_start_raw_local is not None:
+        stage_file(Path(ga0_start_raw_local), "sr_ga0")
+    if ga0_end_raw_local is not None:
+        stage_file(Path(ga0_end_raw_local), "sr_ga0")
     stage_file(Path(ga0_start_local), "sr_ga0")
     stage_file(Path(ga0_end_local), "sr_ga0")
 

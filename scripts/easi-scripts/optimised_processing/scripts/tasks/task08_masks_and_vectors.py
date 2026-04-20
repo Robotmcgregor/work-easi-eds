@@ -138,11 +138,11 @@ def make_masks_and_vectors(
     work_dir.mkdir(parents=True, exist_ok=True)
     masks_s3_dir = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/masks"
     vec_s3_dir   = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/vectors"
-        masks_dir = work_dir / "masks"
-        vectors_dir = work_dir / "vectors"
+    masks_dir = work_dir / "masks"
+    vectors_dir = work_dir / "vectors"
 
-        masks_dir.mkdir(parents=True, exist_ok=True)
-        vectors_dir.mkdir(parents=True, exist_ok=True)
+    masks_dir.mkdir(parents=True, exist_ok=True)
+    vectors_dir.mkdir(parents=True, exist_ok=True)
 
     base_name = _output_base_from_dlj(dljmz_cog_local)
 

@@ -461,6 +461,8 @@ def main():
         copy_run_to_home(
             run_tag=run_tag,
             home_out_dir=Path(args.home_out_dir),
+            ga0_start_raw_local=Path(ga0_start.local_raw_path),
+            ga0_end_raw_local=Path(ga0_end.local_raw_path),
             ga0_start_local=Path(ga0_start.local_clr_path),
             ga0_end_local=Path(ga0_end.local_clr_path),
             legacy_outputs=legacy_files,
