@@ -72,5 +72,9 @@ output/
 
 # Local-only S3/AAD notebooks (contain creds/config)
 notebooks/aad_s3/
+notebooks/archive/aad_s3/
+notebooks/*s3*
+notebooks/*aws*
+notebooks/*credentials*
 
 

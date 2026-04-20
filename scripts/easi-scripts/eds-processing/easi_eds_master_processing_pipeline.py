@@ -268,11 +268,8 @@ import glob
 import re
 from datetime import datetime
 import sys
-import glob
-import os
-import re
-from datetime import datetime
 from typing import Iterable
+from datetime import datetime as _dt
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -679,8 +676,7 @@ def print_date_summary(
     import sys
     sys.exit(f"[DEBUG] print_date_summary force closed")
 
-import glob
-import re
+
 
 _SR_DATE_RX = re.compile(r"(19|20)\d{2}[01]\d[0-3]\d")  # YYYYMMDD in basename
 
@@ -708,6 +704,7 @@ def _resolve_sr_input(
     sr_root: str | None,
     fc_root: str | None,
     sr_only_clr: bool = False,
+    direction: str = "nearest", # --- "start" or "end" or "nearest"
 ) -> Tuple[str, str]:
     """
     Work out which Surface Reflectance (SR) composite file to use for a given
@@ -740,9 +737,7 @@ def _resolve_sr_input(
     If nothing suitable is found, the function exits the program with a
     clear error message via SystemExit.
     """
-    import glob
-    import re
-    from datetime import datetime as _dt
+
 
     # ----------------------------------------
     # 0. Basic tile → scene conversion
@@ -803,6 +798,126 @@ def _resolve_sr_input(
         # pretend its date is either extracted or the target date.
         return paths[0], (extract_date_from_name(Path(paths[0]).name) or target)
 
+
+
+    def pick_directional(paths: list[str], target: str, direction: str) -> Tuple[str, str]:
+        """
+        direction:
+        - "start": pick closest date <= target (earlier or equal)
+        - "end":   pick closest date >= target (later or equal)
+        - "nearest": absolute nearest
+        """
+        tgt = _dt.strptime(target, "%Y%m%d").date()
+
+        # Build (date_str, path) list
+        dated: list[tuple[str, str]] = []
+        for pth in paths:
+            d = extract_date_from_name(Path(pth).name)
+            if d:
+                dated.append((d, pth))
+
+        if not dated:
+            raise SystemExit(
+                f"[ERR] No parseable SR dates in candidates (target={target}, direction={direction})."
+            )
+
+        dates_sorted = sorted(d for d, _ in dated)
+        lo, hi = dates_sorted[0], dates_sorted[-1]
+
+        candidates: list[tuple[int, int, str, str]] = []  # (delta_days, tie_key, path, date_str)
+        for d, pth in dated:
+            dd = _dt.strptime(d, "%Y%m%d").date()
+
+            if direction == "start":
+                if dd > tgt:
+                    continue
+                delta = (tgt - dd).days
+                tie = -int(d)   # prefer most recent if ties
+            elif direction == "end":
+                if dd < tgt:
+                    continue
+                delta = (dd - tgt).days
+                tie = int(d)    # prefer earliest forward if ties
+            else:
+                delta = abs((dd - tgt).days)
+                tie = -int(d)
+
+            candidates.append((delta, tie, pth, d))
+
+        if candidates:
+            candidates.sort(key=lambda x: (x[0], x[1]))
+            _, _, best_path, best_date = candidates[0]
+            return best_path, best_date
+
+        # ---- RARE ERROR (data availability / constraint failure) ----
+        if direction in ("start", "end"):
+            if direction == "start":
+                why = f"no SR date <= requested start ({target})"
+            else:
+                why = f"no SR date >= requested end ({target})"
+
+            raise SystemExit(
+                "\n".join([
+                    "[RARE-ERR] Directional SR selection failed (data availability issue).",
+                    f"  direction: {direction}",
+                    f"  target:    {target}",
+                    f"  reason:    {why}",
+                    f"  available candidate date range: {lo} .. {hi}",
+                    "  likely cause:",
+                    "    - you requested cloud-masked SR only (*_clr.tif), but CLR SR isn't available for that period,",
+                    "      or SR hasn't been produced/downloaded for those dates.",
+                    "  fix options:",
+                    "    - produce/download SR *_clr.tif for the requested period, OR",
+                    "    - run without --sr-only-clr (NOT recommended if you require cloud mask).",
+                ])
+            )
+
+        # direction == "nearest" only
+        # (shouldn't happen, but keep safe)
+        return pick_nearest(paths, target)
+
+    # def pick_directional(paths: list[str], target: str, direction: str) -> Tuple[str, str]:
+    #     """
+    #     direction:
+    #     - "start": pick closest date <= target (earlier or equal)
+    #     - "end":   pick closest date >= target (later or equal)
+    #     - "nearest": absolute nearest (fallback behaviour)
+    #     """
+    #     tgt = _dt.strptime(target, "%Y%m%d").date()
+
+    #     candidates: list[tuple[int, int, str, str]] = []  # (delta_days, tie_key, path, date_str)
+
+    #     for pth in paths:
+    #         d = extract_date_from_name(Path(pth).name)
+    #         if not d:
+    #             continue
+    #         dd = _dt.strptime(d, "%Y%m%d").date()
+
+    #         if direction == "start":
+    #             if dd > tgt:
+    #                 continue
+    #             delta = (tgt - dd).days  # 0 is best, bigger means further back
+    #             tie = -int(d)            # prefer most recent if ties
+    #         elif direction == "end":
+    #             if dd < tgt:
+    #                 continue
+    #             delta = (dd - tgt).days  # 0 is best, bigger means further forward
+    #             tie = int(d)             # prefer earliest forward if ties
+    #         else:
+    #             delta = abs((dd - tgt).days)
+    #             tie = -int(d)            # prefer later if same distance
+
+    #         candidates.append((delta, tie, pth, d))
+
+    #     if candidates:
+    #         candidates.sort(key=lambda x: (x[0], x[1]))
+    #         _, _, best_path, best_date = candidates[0]
+    #         return best_path, best_date
+
+    #     # If we couldn't satisfy direction, fall back to nearest (absolute) as a last resort,
+    #     # BUT caller can decide to treat this as fatal if they want.
+    #     return pick_nearest(paths, target)
+
     # ----------------------------------------
     # 1. Define filename patterns (clr-only vs clr+non-clr)
     # ----------------------------------------
@@ -855,10 +970,24 @@ def _resolve_sr_input(
         for pat in exact_patterns:
             exact.extend(glob.glob(str(p_hint / pat)))
 
+        # # Keep only those that contain the scene code in the filename.
+        # exact = [c for c in exact if scene in Path(c).name.lower()]
+        # if exact:
+        #     return pick_nearest(exact, date_tag)
+
+        # # If no exact date match, try any SR composite in that directory.
+        # anyc: List[str] = []
+        # for pat in any_patterns:
+        #     anyc.extend(glob.glob(str(p_hint / pat)))
+        # anyc = [c for c in anyc if scene in Path(c).name.lower()]
+        # if anyc:
+        #     return pick_nearest(anyc, date_tag)
+
+
         # Keep only those that contain the scene code in the filename.
         exact = [c for c in exact if scene in Path(c).name.lower()]
         if exact:
-            return pick_nearest(exact, date_tag)
+            return pick_directional(exact, date_tag, direction)
 
         # If no exact date match, try any SR composite in that directory.
         anyc: List[str] = []
@@ -866,7 +995,7 @@ def _resolve_sr_input(
             anyc.extend(glob.glob(str(p_hint / pat)))
         anyc = [c for c in anyc if scene in Path(c).name.lower()]
         if anyc:
-            return pick_nearest(anyc, date_tag)
+            return pick_directional(anyc, date_tag, direction)
 
     # ----------------------------------------
     # 3. Second strategy: search under SR/FC roots using EASI-like layout
@@ -897,10 +1026,16 @@ def _resolve_sr_input(
                 cands.extend(glob.glob(str(ddir / pat)))
 
     # Filter by scene code in filename.
+    # cands = [c for c in cands if scene in Path(c).name.lower()]
+    # if cands:
+    #     # If we found anything, pick the date closest to date_tag.
+    #     return pick_nearest(sorted(set(cands)), date_tag)
+
+    # Filter by scene code in filename.
     cands = [c for c in cands if scene in Path(c).name.lower()]
     if cands:
-        # If we found anything, pick the date closest to date_tag.
-        return pick_nearest(sorted(set(cands)), date_tag)
+        return pick_directional(sorted(set(cands)), date_tag, direction)
+
 
     # ----------------------------------------
     # 4. Third strategy: any SR composite in the same month folders
@@ -917,9 +1052,14 @@ def _resolve_sr_input(
             for pat in any_patterns:
                 any_month.extend(glob.glob(str(ddir / pat)))
 
+    # any_month = [c for c in any_month if scene in Path(c).name.lower()]
+    # if any_month:
+    #     return pick_nearest(sorted(set(any_month)), date_tag)
+
     any_month = [c for c in any_month if scene in Path(c).name.lower()]
     if any_month:
-        return pick_nearest(sorted(set(any_month)), date_tag)
+        return pick_directional(sorted(set(any_month)), date_tag, direction)
+
 
     # ----------------------------------------
     # 5. Fourth strategy: recursive search under roots (scene/sr/**)
@@ -936,8 +1076,10 @@ def _resolve_sr_input(
             break  # stop at first root that yields something
 
     broad = [c for c in broad if scene in Path(c).name.lower()]
+    # if broad:
+    #     return pick_nearest(sorted(set(broad)), date_tag)
     if broad:
-        return pick_nearest(sorted(set(broad)), date_tag)
+        return pick_directional(sorted(set(broad)), date_tag, direction)
 
     # ----------------------------------------
     # 6. Final strategy: any SR composite under scene/sr/** (recursive)
@@ -953,8 +1095,11 @@ def _resolve_sr_input(
             break  # stop when we get some hits from a root
 
     any_all = [c for c in any_all if scene in Path(c).name.lower()]
+    # if any_all:
+    #     return pick_nearest(sorted(set(any_all)), date_tag)
     if any_all:
-        return pick_nearest(sorted(set(any_all)), date_tag)
+        return pick_directional(sorted(set(any_all)), date_tag, direction)
+
 
     # ----------------------------------------
     # 7a. If everything failed: stop with a clear error message
@@ -1331,9 +1476,8 @@ def main():
     # ----------------------------------------------------------------------
     # We may be given a direct path (file or directory), or just a root.
     # _resolve_sr_input encapsulates the “find nearest composite by date”
-    # logic and returns both the chosen path and its effective date.
     hint_start = args.sr_dir_start or (args.sr_root or args.fc_root or ".")
-    hint_end = args.sr_dir_end or (args.sr_root or args.fc_root or ".")
+    hint_end   = args.sr_dir_end   or (args.sr_root or args.fc_root or ".")
 
     sr_start_path, eff_start = _resolve_sr_input(
         hint_start,
@@ -1342,7 +1486,9 @@ def main():
         args.sr_root,
         args.fc_root,
         sr_only_clr=args.sr_only_clr,
+        direction="start",   # NEW: <= target (earlier/equal)
     )
+
     sr_end_path, eff_end = _resolve_sr_input(
         hint_end,
         args.end_date,
@@ -1350,7 +1496,30 @@ def main():
         args.sr_root,
         args.fc_root,
         sr_only_clr=args.sr_only_clr,
+        direction="end",     # NEW: >= target (later/equal)
     )
+
+    # ---- RARE DATA AVAILABILITY GUARD ----
+    if args.sr_only_clr and eff_start == eff_end and args.start_date != args.end_date:
+        if eff_start == eff_end and args.start_date != args.end_date:
+            raise SystemExit(
+                "[RARE-ERR] Start and end SR resolved to the SAME effective date "
+                f"(requested {args.start_date}..{args.end_date} -> effective {eff_start}..{eff_end}).\n"
+                f"  start_path={sr_start_path}\n"
+                f"  end_path  ={sr_end_path}\n"
+                "This usually means missing SR *_clr.tif on one side of the requested range.\n"
+                "Action: check SR CLR availability or regenerate SR for the period."
+            )
+
+        if eff_start > eff_end:
+            raise SystemExit(
+                "[RARE-ERR] Effective SR start date is AFTER effective SR end date "
+                f"(requested {args.start_date}..{args.end_date} -> effective {eff_start}..{eff_end}).\n"
+                f"  start_path={sr_start_path}\n"
+                f"  end_path  ={sr_end_path}\n"
+                "This indicates missing SR *_clr.tif around one side of the range or invalid fallback."
+            )
+
 
     print("[DEBUG] SR start resolved:", sr_start_path)
     print("[DEBUG] SR end resolved:  ", sr_end_path)
@@ -1542,12 +1711,45 @@ def main():
     }.get(args.timeseries_source, "dc4mz")
 
 
+    # # Always define expected outputs (these must exist as variables even if we skip build)
+    # db8_start = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
+    # db8_end   = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
+    # dc4_glob = str(compat_dir / f"lztmre_{scene}_*_{dc4_tag}.img")
+
+    # print("\n[OUTPUT] db8 products")
+    # print(f"  db8 start expected: {db8_start.resolve()}")
+    # print(f"  db8 end   expected: {db8_end.resolve()}")
+
+    # print(f"  exists start: {db8_start.exists()}")
+    # print(f"  exists end:   {db8_end.exists()}")
+
+    # # Optional: fail FAST if they are missing
+    # if not db8_start.exists() or not db8_end.exists():
+    #     raise RuntimeError(
+    #         "[FATAL] db8 outputs missing after compat build.\n"
+    #         f"  start: {db8_start}\n"
+    #         f"  end:   {db8_end}\n"
+    #         "Check compat builder stdout above and confirm out-root."
+    #     )
+
+    # import sys
+    # sys.exit("db8 shut down db8 missing.")
+
     # Always define expected outputs (these must exist as variables even if we skip build)
     db8_start = compat_dir / f"lztmre_{scene}_{eff_start}_db8mz.img"
     db8_end   = compat_dir / f"lztmre_{scene}_{eff_end}_db8mz.img"
-    dc4_glob = str(compat_dir / f"lztmre_{scene}_*_{dc4_tag}.img")
+    dc4_glob  = str(compat_dir / f"lztmre_{scene}_*_{dc4_tag}.img")
 
+    # --- PRE-CHECK (before build decision) ---
+    print("\n[PRECHECK] db8 expected paths")
+    print(f"  eff_start={eff_start} -> {db8_start.resolve()} (exists={db8_start.exists()})")
+    print(f"  eff_end  ={eff_end} -> {db8_end.resolve()} (exists={db8_end.exists()})")
+    if eff_start == eff_end:
+        print("[WARN] eff_start == eff_end (same effective SR date) -> only ONE db8 filename is expected")
 
+    print("\n[PRECHECK] db8 currently on disk:")
+    for p in sorted(compat_dir.glob(f"lztmre_{scene}_*_db8mz.img")):
+        print(" ", p.resolve())
 
     # Look for existing dc4 stack members
     dc4_existing = _glob.glob(dc4_glob)
@@ -1608,6 +1810,26 @@ def main():
             results["inputs"]["compat_build"]["fc_patterns"] = list(map(str, fc_patterns))
 
             run_cmd(cmd_compat, args.dry_run, "build_compat", results)
+
+            print("\n[POSTCHECK] db8 after compat build")
+            print(f"  expected start: {db8_start.resolve()} (exists={db8_start.exists()})")
+            print(f"  expected end:   {db8_end.resolve()} (exists={db8_end.exists()})")
+
+            print("\n[POSTCHECK] db8 found (glob):")
+            db8_found = sorted(compat_dir.glob(f"lztmre_{scene}_*_db8mz.img"))
+            for p in db8_found:
+                print(" ", p.resolve())
+            print(f"[POSTCHECK] db8_found_count={len(db8_found)}")
+
+            # Optional HARD FAIL only when dates differ
+            if eff_start != eff_end and (not db8_start.exists() or not db8_end.exists()):
+                raise RuntimeError(
+                    "[FATAL] Expected TWO db8 files (different effective dates), but one is missing.\n"
+                    f"  eff_start={eff_start} -> {db8_start}\n"
+                    f"  eff_end={eff_end} -> {db8_end}\n"
+                    "Most likely: compat builder only consumes the LAST --sr-dir/--sr-date (argparse overwrite)."
+                )
+
 
 
 
@@ -1725,7 +1947,13 @@ def main():
     else:
         print("\n[STEP] build_compat")
         print("Existing compat products detected; skipping build (use --force-compat to rebuild)")
+        print("\n[POSTCHECK] db8 after skipping compat")
+        print(f"  expected start: {db8_start.resolve()} (exists={db8_start.exists()})")
+        print(f"  expected end:   {db8_end.resolve()} (exists={db8_end.exists()})")
 
+
+    # import sys
+    # sys.exit("[DEBUG] - db8 check")
 
     # Record compat outputs (these are what downstream steps will use)
     results.setdefault("outputs", {}).setdefault("compat", {})
@@ -1958,46 +2186,131 @@ def main():
     # import sys
     # sys.exit("forced stop section 9")
 
+    # # ----------------------------------------------------------------------
+    # # 10. Step 4: Polygonise clearing thresholds
+    # # ----------------------------------------------------------------------
+    # # Convert clearing classes (≥ thresholds, usually 34..39) into polygons.
+    # shp_base = compat_dir / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha"
+    # shp_base.mkdir(parents=True, exist_ok=True)
+
+    # poly_script = (
+    #     Path(__file__).resolve().parent / "easi_polygonize_merged_thresholds.py"
+    # )
+
+    # cmd_poly = [
+    #     pyexe,
+    #     str(poly_script),
+    #     "--dll",
+    #     str(dll),
+    #     "--out-dir",
+    #     str(shp_base),
+    #     "--min-ha",
+    #     str(args.min_ha),
+    #     "--thresholds",
+    #     *[str(t) for t in args.thresholds],
+    # ]
+
+    # # Record polygonisation parameters and output directory (provenance)
+    # results.setdefault("outputs", {}).setdefault("polygonize_thresholds", {})
+    # results["outputs"]["polygonize_thresholds"].update({
+    #     "dll": str(dll),
+    #     "out_dir": str(shp_base),
+    #     "min_ha": float(args.min_ha),
+    #     "thresholds": [int(t) for t in args.thresholds],
+    #     "script": str(poly_script),
+    #     "dry_run": bool(args.dry_run),
+    # })
+
+
+    # run_cmd(cmd_poly, args.dry_run, "polygonize_thresholds", results)
+
     # ----------------------------------------------------------------------
-    # 10. Step 4: Polygonise clearing thresholds
+    # 10. Step 4: Polygonise clearing (Option B preferred, legacy fallback)
     # ----------------------------------------------------------------------
-    # Convert clearing classes (≥ thresholds, usually 34..39) into polygons.
-    shp_base = compat_dir / f"shp_d{eff_start}_{eff_end}_merged_min{int(args.min_ha)}ha"
+
+    shp_base = compat_dir / f"shp_d{eff_start}_{eff_end}_min{int(args.min_ha)}ha"
     shp_base.mkdir(parents=True, exist_ok=True)
 
     poly_script = (
-        Path(__file__).resolve().parent / "easi_polygonize_merged_thresholds.py"
+        Path(__file__).resolve().parent / "easi_polygonize_merged_thresholds_calibrate40_80_v2.py"
     )
 
-    cmd_poly = [
-        pyexe,
-        str(poly_script),
-        "--dll",
-        str(dll),
-        "--out-dir",
-        str(shp_base),
-        "--min-ha",
-        str(args.min_ha),
-        "--thresholds",
-        *[str(t) for t in args.thresholds],
-    ]
+    # Expected Option B diagnostics (written earlier in pipeline)
+    diag_dir = Path(dll).parent / "diagnostics"
+    clear_mask = diag_dir / f"lztmre_{scene}_d{eff_start}{eff_end}_{vi_tag}_clear_mask.img"
+    strong_mask = diag_dir / f"lztmre_{scene}_d{eff_start}{eff_end}_{vi_tag}_strong_mask.img"
 
-    # Record polygonisation parameters and output directory (provenance)
-    results.setdefault("outputs", {}).setdefault("polygonize_thresholds", {})
-    results["outputs"]["polygonize_thresholds"].update({
+    use_option_b = clear_mask.exists() and strong_mask.exists()
+
+    if use_option_b:
+        print("[PIPELINE] Using Option B polygonisation (CLEAR/STRONG masks)")
+
+        cmd_poly = [
+            pyexe,
+            str(poly_script),
+            "--dll",
+            str(dll),
+            "--clear-mask",
+            str(clear_mask),
+            "--strong-mask",
+            str(strong_mask),
+            "--strong-frac",
+            "0.05",
+            "--out-dir",
+            str(shp_base),
+            "--min-ha",
+            str(args.min_ha),
+        ]
+
+        poly_mode = "option_b_clear_strong"
+
+    else:
+        print("[PIPELINE] Using legacy threshold polygonisation (DLL classes)")
+
+        cmd_poly = [
+            pyexe,
+            str(poly_script),
+            "--dll",
+            str(dll),
+            "--out-dir",
+            str(shp_base),
+            "--min-ha",
+            str(args.min_ha),
+            "--thresholds",
+            *[str(t) for t in args.thresholds],
+        ]
+
+        poly_mode = "legacy_thresholds"
+
+    # ----------------------------------------------------------------------
+    # Provenance / logging
+    # ----------------------------------------------------------------------
+    results.setdefault("outputs", {}).setdefault("polygonize", {})
+    results["outputs"]["polygonize"].update({
+        "mode": poly_mode,
         "dll": str(dll),
         "out_dir": str(shp_base),
         "min_ha": float(args.min_ha),
-        "thresholds": [int(t) for t in args.thresholds],
         "script": str(poly_script),
         "dry_run": bool(args.dry_run),
     })
 
+    if use_option_b:
+        results["outputs"]["polygonize"].update({
+            "clear_mask": str(clear_mask),
+            "strong_mask": str(strong_mask),
+            "strong_frac": 0.05,
+        })
+    else:
+        results["outputs"]["polygonize"].update({
+            "thresholds": [int(t) for t in args.thresholds],
+        })
 
-    run_cmd(cmd_poly, args.dry_run, "polygonize_thresholds", results)
+    run_cmd(cmd_poly, args.dry_run, "polygonize", results)
 
-    # import sys
-    # sys.exit("forced stop section 10")
+
+    import sys
+    sys.exit("forced stop section 10")
 
     # ----------------------------------------------------------------------
     # 11. Step 5: Vector post-processing (clean up polygons)

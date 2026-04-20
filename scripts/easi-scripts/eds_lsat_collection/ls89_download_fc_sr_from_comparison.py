@@ -487,7 +487,9 @@ def process_tile_from_comparison(
     start_date: str | None = None,
     end_date: str | None = None,
     dry_run: bool = False,
+    sr_only: bool = False,
 ) -> None:
+
     """
     For one tile, read comparison_table.csv, subset to that tile (and optional
     date window), then loop over dates and build SR+FC composites (with FMASK)
@@ -564,9 +566,14 @@ def process_tile_from_comparison(
         fc_dir = tile_root / "fc" / yyyy / yyyymm
         mask_dir = tile_root / "ffmask" / yyyy / yyyymm
 
+        # ensure_dir(sr_dir) -> SR-only
+        # ensure_dir(fc_dir)
+        # ensure_dir(mask_dir)
         ensure_dir(sr_dir)
-        ensure_dir(fc_dir)
         ensure_dir(mask_dir)
+        if not sr_only:
+            ensure_dir(fc_dir)
+
 
         # sr_nb_filename      = f"ls89sr_{tile_id}_{date_tag}_nbart6m.tif"
         # sr_nb_clr_filename  = f"ls89sr_{tile_id}_{date_tag}_nbart6m_clr.tif"
@@ -598,7 +605,11 @@ def process_tile_from_comparison(
         print(f"        ffmask:        {ffmask_out}")
 
         # Check local existence of ALL 5 files
-        local_files = [sr_nb_out, sr_nb_clr_out, fc_nb_out, fc_nb_clr_out, ffmask_out]
+        # local_files = [sr_nb_out, sr_nb_clr_out, fc_nb_out, fc_nb_clr_out, ffmask_out] #sr-only
+        local_files = [sr_nb_out, sr_nb_clr_out, ffmask_out]
+        if not sr_only:
+            local_files += [fc_nb_out, fc_nb_clr_out]
+
         if all(p.exists() for p in local_files):
             print(f"[DL] All SR/FC/ffmask outputs already exist locally for {date_str}, skipping.")
             continue
@@ -610,7 +621,13 @@ def process_tile_from_comparison(
         fc_nb_clr_key = s3_key_for_tile(user_prefix, tile_id, yyyy, yyyymm, fc_nb_clr_filename, "fc")
         ffmask_key    = s3_key_for_tile(user_prefix, tile_id, yyyy, yyyymm, ffmask_filename,    "ffmask")
 
-        s3_keys = [sr_nb_key, sr_nb_clr_key, fc_nb_key, fc_nb_clr_key, ffmask_key]
+        # s3_keys = [sr_nb_key, sr_nb_clr_key, fc_nb_key, fc_nb_clr_key, ffmask_key] #sr-only
+
+        s3_keys = [sr_nb_key, sr_nb_clr_key, ffmask_key]
+        if not sr_only:
+            s3_keys += [fc_nb_key, fc_nb_clr_key]
+
+
         s3_exists = [s3_object_exists(s3_client, S3_BUCKET, k) for k in s3_keys]
 
         if all(s3_exists):
@@ -685,18 +702,40 @@ def process_tile_from_comparison(
         # ffmask for this day (2D)
         ffmask = composite_fmask(fmask, FMASK_CLEAR_VALUES)
 
+        # # -----------------------------------------------------------------
+        # # Load FC for this date and apply the same FMASK #sr-only
+        # # -----------------------------------------------------------------
+        # ds_fc = load_fc_for_day(dc, lat_range, lon_range, date_str, target_utm_epsg, crs_suffix)
+        # if ds_fc is None or ds_fc.sizes.get("time", 0) == 0:
+        #     print(f"[DL] No FC data loaded for {date_str}, skipping FC.")
+        #     fc_composite = None
+        #     fc_composite_clr = None
+        # else:
+        #     fc_composite = composite_time_mean(ds_fc, FC_BANDS)
+        #     fc_masked = apply_fmask(ds_fc[FC_BANDS], fmask, FMASK_CLEAR_VALUES)
+        #     fc_composite_clr = composite_time_mean(fc_masked, FC_BANDS)
+
         # -----------------------------------------------------------------
-        # Load FC for this date and apply the same FMASK
+        # Load FC for this date and apply the same FMASK (skip entirely in SR-only mode)
         # -----------------------------------------------------------------
-        ds_fc = load_fc_for_day(dc, lat_range, lon_range, date_str, target_utm_epsg, crs_suffix)
-        if ds_fc is None or ds_fc.sizes.get("time", 0) == 0:
-            print(f"[DL] No FC data loaded for {date_str}, skipping FC.")
+        if sr_only:
+            print(f"[DL] SR-only mode enabled → skipping FC load/composite for {date_str}.")
+            ds_fc = None
             fc_composite = None
             fc_composite_clr = None
         else:
-            fc_composite = composite_time_mean(ds_fc, FC_BANDS)
-            fc_masked = apply_fmask(ds_fc[FC_BANDS], fmask, FMASK_CLEAR_VALUES)
-            fc_composite_clr = composite_time_mean(fc_masked, FC_BANDS)
+            ds_fc = load_fc_for_day(
+                dc, lat_range, lon_range, date_str, target_utm_epsg, crs_suffix
+            )
+            if ds_fc is None or ds_fc.sizes.get("time", 0) == 0:
+                print(f"[DL] No FC data loaded for {date_str}, skipping FC.")
+                fc_composite = None
+                fc_composite_clr = None
+            else:
+                fc_composite = composite_time_mean(ds_fc, FC_BANDS)
+                fc_masked = apply_fmask(ds_fc[FC_BANDS], fmask, FMASK_CLEAR_VALUES)
+                fc_composite_clr = composite_time_mean(fc_masked, FC_BANDS)
+
 
         # -----------------------------------------------------------------
         # Dry-run mode
@@ -739,96 +778,11 @@ def process_tile_from_comparison(
         )
         print(f"[META] Wrote SR clr metadata sidecar: {sidecar}")
 
-        # -----------------------------------------------------------------
-        # Write FC
-        # -----------------------------------------------------------------
-        if fc_composite is not None:
-            print(f"[DL] Writing FC (unmasked) composite to {fc_nb_out}")
-            write_geotiff(fc_composite, fc_nb_out, dtype="float32", nodata=255.0)
-        else:
-            print("[DL] Skipping FC unmasked write (no FC data).")
-
-        if fc_composite_clr is not None:
-            print(f"[DL] Writing FC (masked) composite to {fc_nb_clr_out}")
-            write_geotiff(fc_composite_clr, fc_nb_clr_out, dtype="float32", nodata=255.0)
-
-            sidecar = finalise_composite(
-                out_tif=fc_nb_clr_out,
-                ffmask_tif=ffmask_out,
-                provenance={**provenance, "PRODUCT_KIND": "FC_FCM_CLR"},
-                nodata_value=255.0,
-            )
-            print(f"[META] Wrote FC clr metadata sidecar: {sidecar}")
-        else:
-            print("[DL] Skipping FC masked write (no FC data).")
-
-
-        # # ---------------- SR composites (nbart & nbart_clr) ----------------
-        # sr_composite = composite_time_mean(sr_all, SR_BANDS)
-
-        # sr_masked = apply_fmask(sr_all[SR_BANDS], fmask, FMASK_CLEAR_VALUES)
-        # sr_composite_clr = composite_time_mean(sr_masked, SR_BANDS)
-
-        # # ffmask for this day (2D)
-        # ffmask = composite_fmask(fmask, FMASK_CLEAR_VALUES)
-
         # # -----------------------------------------------------------------
-        # # Load FC for this date and apply the same FMASK
+        # # Write FC - sr-only
         # # -----------------------------------------------------------------
-        # ds_fc = load_fc_for_day(dc, lat_range, lon_range, date_str, target_utm_epsg, crs_suffix)
-        # if ds_fc is None or ds_fc.sizes.get("time", 0) == 0:
-        #     print(f"[DL] No FC data loaded for {date_str}, skipping FC.")
-        #     fc_composite = None
-        #     fc_composite_clr = None
-        # else:
-        #     # Unmasked FC composite
-        #     fc_composite = composite_time_mean(ds_fc, FC_BANDS)
-
-        #     # Masked FC composite (clr)
-        #     fc_masked = apply_fmask(ds_fc[FC_BANDS], fmask, FMASK_CLEAR_VALUES)
-        #     fc_composite_clr = composite_time_mean(fc_masked, FC_BANDS)
-
-        # # -----------------------------------------------------------------
-        # # Dry-run mode: just report what we'd do
-        # # -----------------------------------------------------------------
-        # if dry_run:
-        #     print("[DL] Dry run – would write:")
-        #     print(f"  SR nbart      -> {sr_nb_out}")
-        #     print(f"  SR nbart_clr  -> {sr_nb_clr_out}")
-        #     print(f"  FC fcm        -> {fc_nb_out}")
-        #     print(f"  FC fcm_clr    -> {fc_nb_clr_out}")
-        #     print(f"  ffmask        -> {ffmask_out}")
-        #     print("[DL] and upload to S3 keys:")
-        #     print(f"  {sr_nb_key}")
-        #     print(f"  {sr_nb_clr_key}")
-        #     print(f"  {fc_nb_key}")
-        #     print(f"  {fc_nb_clr_key}")
-        #     print(f"  {ffmask_key}")
-        #     continue
-
-        # # -----------------------------------------------------------------
-        # # Write local GeoTIFFs (still in native CRS; no reprojection)
-        # # -----------------------------------------------------------------
-        # print(f"[DL] Writing SR (unmasked) composite to {sr_nb_out}")
-        # # SR: float32 with nodata = -999
-        # write_geotiff(sr_composite, sr_nb_out, dtype="float32", nodata=-999.0)
-
-        # print(f"[DL] Writing SR (masked) composite to {sr_nb_clr_out}")
-        # write_geotiff(sr_composite_clr, sr_nb_clr_out, dtype="float32", nodata=-999.0)
-
-        # sidecar = finalise_composite(
-        #     out_tif=sr_nb_clr_out,
-        #     ffmask_tif=ffmask_out,
-        #     provenance={**provenance, "PRODUCT_KIND": "SR_NBART_CLR"},
-        #     nodata_value=-999.0,
-        # )
-        # print(f"[META] Wrote SR clr metadata sidecar: {sidecar}")
-
-
-
         # if fc_composite is not None:
         #     print(f"[DL] Writing FC (unmasked) composite to {fc_nb_out}")
-        #     # FC: nodata code 255 (consistent with raw product)
         #     write_geotiff(fc_composite, fc_nb_out, dtype="float32", nodata=255.0)
         # else:
         #     print("[DL] Skipping FC unmasked write (no FC data).")
@@ -844,13 +798,35 @@ def process_tile_from_comparison(
         #         nodata_value=255.0,
         #     )
         #     print(f"[META] Wrote FC clr metadata sidecar: {sidecar}")
-
         # else:
         #     print("[DL] Skipping FC masked write (no FC data).")
 
-        # print(f"[DL] Writing ffmask to {ffmask_out}")
-        # # Usually ffmask 0/1 is fine; no nodata needed, but you can add one if you like.
-        # write_geotiff(ffmask, ffmask_out, dtype="uint8", nodata=None)
+
+        # -----------------------------------------------------------------
+        # Write FC (skip entirely in SR-only mode)
+        # -----------------------------------------------------------------
+        if sr_only:
+            print(f"[DL] SR-only mode enabled → skipping ALL FC writes for {date_str}.")
+        else:
+            if fc_composite is not None:
+                print(f"[DL] Writing FC (unmasked) composite to {fc_nb_out}")
+                write_geotiff(fc_composite, fc_nb_out, dtype="float32", nodata=255.0)
+            else:
+                print("[DL] Skipping FC unmasked write (no FC data).")
+
+            if fc_composite_clr is not None:
+                print(f"[DL] Writing FC (masked) composite to {fc_nb_clr_out}")
+                write_geotiff(fc_composite_clr, fc_nb_clr_out, dtype="float32", nodata=255.0)
+
+                sidecar = finalise_composite(
+                    out_tif=fc_nb_clr_out,
+                    ffmask_tif=ffmask_out,
+                    provenance={**provenance, "PRODUCT_KIND": "FC_FCM_CLR"},
+                    nodata_value=255.0,
+                )
+                print(f"[META] Wrote FC clr metadata sidecar: {sidecar}")
+            else:
+                print("[DL] Skipping FC masked write (no FC data).")
 
 
         # -----------------------------------------------------------------
@@ -932,6 +908,14 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional end date (YYYY-MM-DD) to filter comparison table",
     )
+
+    # Skip FC data
+    parser.add_argument(
+        "--sr-only",
+        action="store_true",
+        help="Run SR-only pipeline (skip all FC-related steps)"
+    )
+
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -939,6 +923,10 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+
+# import sys
+# sys.exit("[DEBUG] - init comparison")
 
 # ---------------------------------------------------------------------
 # Metadata finalisation (mask stats + provenance)
@@ -1124,7 +1112,9 @@ def main() -> None:
         start_date=args.start_date,
         end_date=args.end_date,
         dry_run=args.dry_run,
+        sr_only=args.sr_only,
     )
+
 
 
 if __name__ == "__main__":
