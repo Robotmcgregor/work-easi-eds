@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import rasterio
@@ -10,8 +10,8 @@ from rasterio.features import shapes
 import geopandas as gpd
 from shapely.geometry import shape
 
-from lib.cog import to_cog
 from lib.s3_io import upload_file_to_s3
+from lib.cog import to_cog
 
 import re
 
@@ -34,13 +34,46 @@ def _insert_tag_before_epsg(base_name: str, tag: str) -> str:
 
 @dataclass(frozen=True)
 class MaskVectorOutputs:
-    """Container for run-scoped local and S3 mask/vector outputs."""
+    """
+    Simple container for mask vector output paths.
+    Just groups everything together so its easier to pass around.
+    """
     strong_mask_local: Path
     clear_mask_local: Path
     strong_mask_s3: str
     clear_mask_s3: str
     strong_shp_s3_prefix: str
     clear_shp_s3_prefix: str
+
+
+def _write_mask_geotiff(
+    *,
+    src_profile: dict,
+    src_transform,
+    src_crs,
+    mask_u8: np.ndarray,
+    out_raw: Path,
+) -> None:
+    profile = src_profile.copy()
+    profile.update(
+        driver="GTiff",
+        count=1,
+        dtype="uint8",
+        nodata=0,
+        compress="DEFLATE",
+        predictor=2,
+        tiled=True,
+        blockxsize=512,
+        blockysize=512,
+        BIGTIFF="IF_SAFER",
+    )
+
+    # Ensure 2D
+    if mask_u8.ndim != 2:
+        raise ValueError(f"Expected 2D mask array, got shape={mask_u8.shape}")
+
+    with rasterio.open(out_raw, "w", **profile) as dst:
+        dst.write(mask_u8, 1)
 
 def _polygonise_mask(
     *,
@@ -129,20 +162,52 @@ def make_masks_and_vectors(
     dry_run: bool = False,
 ) -> MaskVectorOutputs:
     """
-        Build strong/clear masks under the supplied work_dir and upload them to:
-            {s3_prefix}/tiles/{tile}/outputs/{run_tag}/masks
-            {s3_prefix}/tiles/{tile}/outputs/{run_tag}/vectors
+    Create:
+      - strong_mask_cog.tif (>= strong_threshold)
+      - clear_mask_cog.tif  (>= clear_threshold)
+      - polygonised shapefiles for each mask
+
+    Uses the dljmz COG as clearing_prob source.
     """
     tile = tile.lower().strip()
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    # masks_s3_dir = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/masks"
+    # vec_s3_dir   = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/vectors"
+
+    # strong_mask_key = f"{masks_s3_dir}/lztmre_{tile}_{run_tag}_strong_ge{int(strong_threshold):02d}_mask_cog.tif"
+    # clear_mask_key  = f"{masks_s3_dir}/lztmre_{tile}_{run_tag}_clear_ge{int(clear_threshold):02d}_mask_cog.tif"
+
+    # # strong_mask_raw = work_dir / f"{tile}_{run_tag}_strong_mask_raw.tif"
+    # # clear_mask_raw  = work_dir / f"{tile}_{run_tag}_clear_mask_raw.tif"
+
+    # # strong_mask_cog = work_dir / f"{tile}_{run_tag}_strong_mask_cog.tif"
+    # # clear_mask_cog  = work_dir / f"{tile}_{run_tag}_clear_mask_cog.tif"
+
+    # strong_mask_raw = work_dir / f"{run_tag}_strong_mask_raw.tif"
+    # clear_mask_raw  = work_dir / f"{run_tag}_clear_mask_raw.tif"
+
+    # strong_mask_cog = work_dir / f"{run_tag}_strong_mask_cog.tif"
+    # clear_mask_cog  = work_dir / f"{run_tag}_clear_mask_cog.tif"
+
+    # strong_vec_dir = work_dir / "vectors" / "strong"
+    # clear_vec_dir  = work_dir / "vectors" / "clear"
+
+    # strong_vec_prefix = f"{vec_s3_dir}/strong_ge{int(strong_threshold):02d}"
+    # clear_vec_prefix  = f"{vec_s3_dir}/clear_ge{int(clear_threshold):02d}"
+
+
     masks_s3_dir = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/masks"
     vec_s3_dir   = f"{s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/vectors"
-        masks_dir = work_dir / "masks"
-        vectors_dir = work_dir / "vectors"
 
-        masks_dir.mkdir(parents=True, exist_ok=True)
-        vectors_dir.mkdir(parents=True, exist_ok=True)
+    # base_name = _output_base_from_dlj(dljmz_cog_local)
+
+    # strong_mask_stem = f"{base_name}_strong_ge{int(strong_threshold):02d}_mask"
+    # clear_mask_stem  = f"{base_name}_clear_ge{int(clear_threshold):02d}_mask"
+
+    # strong_vec_stem = f"{base_name}_strong_ge{int(strong_threshold):02d}"
+    # clear_vec_stem  = f"{base_name}_clear_ge{int(clear_threshold):02d}"
 
     base_name = _output_base_from_dlj(dljmz_cog_local)
 
@@ -164,14 +229,14 @@ def make_masks_and_vectors(
     strong_mask_key = f"{masks_s3_dir}/{strong_mask_stem}.tif"
     clear_mask_key  = f"{masks_s3_dir}/{clear_mask_stem}.tif"
 
-    strong_mask_raw = masks_dir / f"{strong_mask_stem}_raw.tif"
-    clear_mask_raw  = masks_dir / f"{clear_mask_stem}_raw.tif"
+    strong_mask_raw = work_dir / f"{strong_mask_stem}_raw.tif"
+    clear_mask_raw  = work_dir / f"{clear_mask_stem}_raw.tif"
 
-    strong_mask_cog = masks_dir / f"{strong_mask_stem}.tif"
-    clear_mask_cog  = masks_dir / f"{clear_mask_stem}.tif"
+    strong_mask_cog = work_dir / f"{strong_mask_stem}.tif"
+    clear_mask_cog  = work_dir / f"{clear_mask_stem}.tif"
 
-    strong_vec_dir = vectors_dir / "strong"
-    clear_vec_dir  = vectors_dir / "clear"
+    strong_vec_dir = work_dir / "vectors" / "strong"
+    clear_vec_dir  = work_dir / "vectors" / "clear"
 
     strong_vec_prefix = f"{vec_s3_dir}/strong_ge{int(strong_threshold):02d}"
     clear_vec_prefix  = f"{vec_s3_dir}/clear_ge{int(clear_threshold):02d}"
@@ -190,12 +255,31 @@ def make_masks_and_vectors(
             clear_shp_s3_prefix=clear_vec_prefix,
         )
 
+    # with rasterio.open(dljmz_cog_local) as src:
+    #         # dljmz is multi-band; clearing_prob is band 4 in the legacy output
+    # band = 4 if src.count >= 4 else 1
+    # if src.count < 4:
+    #     print(f"[WARN] dljmz has only {src.count} band(s); using band 1")
+    # arr = src.read(band)
+    # print(f"[INFO] dljmz band {band} stats: min={arr.min()} max={arr.max()} dtype={arr.dtype}")
+    # #     profile = src.profile
+    # #     transform = src.transform
+    # #     crs = src.crs
+
+    # ------------------------------------------------------------
+    # Read dljmz (multi-band). clearing_prob is band 4 in legacy output.
+    # ------------------------------------------------------------
     with rasterio.open(dljmz_cog_local) as src:
         band = 4 if src.count >= 4 else 1
         if src.count < 4:
             print(f"[WARN] dljmz has only {src.count} band(s); using band 1")
 
         arr = src.read(band)
+        print("-"*100)
+        print("[CHECK] band4 >=60:", int((arr >= 60).sum()))
+        print("[CHECK] band4 >=80:", int((arr >= 80).sum()))
+        print("[CHECK] band4 nonzero:", int((arr != 0).sum()))
+        print("-"*100)
 
         profile = src.profile.copy()
         transform = src.transform
@@ -225,8 +309,25 @@ def make_masks_and_vectors(
     strong_u8 = strong.astype(np.uint8)
     clear_u8  = clear.astype(np.uint8)
 
-    print(f"[INFO] strong pixels: {int(strong_u8.sum())}, clear pixels: {int(clear_u8.sum())}")
+    print("[DEBUG] MASK DIAGNOSTICS")
 
+    print("[DEBUG] strong mask stats:")
+    print("  unique values:", np.unique(strong_u8))
+    print("  pixel count (sum):", int(strong_u8.sum()))
+    print("  pixel count (>0):", int((strong_u8 > 0).sum()))
+
+    print("[DEBUG] clear mask stats:")
+    print("  unique values:", np.unique(clear_u8))
+    print("  pixel count (sum):", int(clear_u8.sum()))
+    print("  pixel count (>0):", int((clear_u8 > 0).sum()))
+    print("="*80 + "\n")
+
+    print(f"[INFO] strong pixels: {int(strong_u8.sum())}, clear pixels: {int(clear_u8.sum())}")
+    print("="*100)
+
+    # ------------------------------------------------------------
+    # Write raw mask GeoTIFFs (required before COG conversion)
+    # ------------------------------------------------------------
     mask_profile = profile.copy()
     mask_profile.update(
         driver="GTiff",
@@ -237,17 +338,41 @@ def make_masks_and_vectors(
         tiled=True,
     )
 
+    # Write raw mask GeoTIFFs first
     with rasterio.open(str(strong_mask_raw), "w", **mask_profile) as dst:
         dst.write(strong_u8, 1)
 
     with rasterio.open(str(clear_mask_raw), "w", **mask_profile) as dst:
         dst.write(clear_u8, 1)
 
+    # ------------------------------------------------------------
+    # DEBUG: Verify raw masks written correctly
+    # ------------------------------------------------------------
+    print("\n" + "="*80)
+    print("[DEBUG] VERIFY RAW MASKS ON DISK")
+
+    with rasterio.open(str(strong_mask_raw)) as src:
+        arr_check = src.read(1)
+        print("[DEBUG] strong_mask_raw unique:", np.unique(arr_check))
+        print("[DEBUG] strong_mask_raw sum:", int(arr_check.sum()))
+        print("[DEBUG] strong_mask_raw >0:", int((arr_check > 0).sum()))
+
+    with rasterio.open(str(clear_mask_raw)) as src:
+        arr_check = src.read(1)
+        print("[DEBUG] clear_mask_raw unique:", np.unique(arr_check))
+        print("[DEBUG] clear_mask_raw sum:", int(arr_check.sum()))
+        print("[DEBUG] clear_mask_raw >0:", int((arr_check > 0).sum()))
+
+    print("="*80 + "\n")
+
+    # Hard assert to catch path mistakes early
     if not strong_mask_raw.exists():
         raise FileNotFoundError(f"Strong raw mask not created: {strong_mask_raw}")
     if not clear_mask_raw.exists():
         raise FileNotFoundError(f"Clear raw mask not created: {clear_mask_raw}")
 
+
+    # Convert to COG (lossless)
     to_cog(str(strong_mask_raw), str(strong_mask_cog), overwrite=True)
     to_cog(str(clear_mask_raw), str(clear_mask_cog), overwrite=True)
 
@@ -258,12 +383,44 @@ def make_masks_and_vectors(
     gdf_strong = _polygonise_mask(mask_u8=strong_u8, transform=transform, crs=crs, min_area_ha=float(min_area_ha))
     gdf_clear  = _polygonise_mask(mask_u8=clear_u8,  transform=transform, crs=crs, min_area_ha=float(min_area_ha))
 
+    print("\n" + "="*80)
+    print("[DEBUG] POLYGON DIAGNOSTICS")
+
+    print(f"[DEBUG] Strong polygons count: {len(gdf_strong)}")
+    if len(gdf_strong) > 0:
+        print("[DEBUG] Strong polygons head:")
+        print(gdf_strong.head())
+        print("[DEBUG] Strong polygon areas (ha) sample:")
+        if "area_ha" in gdf_strong.columns:
+            print(gdf_strong["area_ha"].head())
+    else:
+        print("[DEBUG] Strong polygon GeoDataFrame is EMPTY")
+
+    print("-"*60)
+
+    print(f"[DEBUG] Clear polygons count: {len(gdf_clear)}")
+    if len(gdf_clear) > 0:
+        print("[DEBUG] Clear polygons head:")
+        print(gdf_clear.head())
+        print("[DEBUG] Clear polygon areas (ha) sample:")
+        if "area_ha" in gdf_clear.columns:
+            print(gdf_clear["area_ha"].head())
+    else:
+        print("[DEBUG] Clear polygon GeoDataFrame is EMPTY")
+
+    print("="*80 + "\n")
+
+    # _write_shapefile_set(gdf_strong, strong_vec_dir, stem=f"lztmre_{tile}_{run_tag}_strong_ge{int(strong_threshold):02d}")
+    # _write_shapefile_set(gdf_clear,  clear_vec_dir,  stem=f"lztmre_{tile}_{run_tag}_clear_ge{int(clear_threshold):02d}")
+
+
     _write_shapefile_set(gdf_strong, strong_vec_dir, stem=strong_vec_stem)
     _write_shapefile_set(gdf_clear,  clear_vec_dir,  stem=clear_vec_stem)
-
+    # Upload shapefile folders (all sidecar files)
     _upload_shapefile_folder(strong_vec_dir, bucket=bucket, s3_prefix=strong_vec_prefix)
     _upload_shapefile_folder(clear_vec_dir,  bucket=bucket, s3_prefix=clear_vec_prefix)
 
+    # cleanup raw masks
     try:
         strong_mask_raw.unlink(missing_ok=True)
         clear_mask_raw.unlink(missing_ok=True)

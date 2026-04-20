@@ -360,7 +360,6 @@ def main(argv=None) -> int:
     ap.add_argument("--vi-tag", default="vi-ndvi", help="Tag used in diagnostic filenames (default: vi-ndvi)")
     ap.add_argument("--diag-bins", type=int, default=256, help="Histogram bin count (default 256)")
     ap.add_argument("--diag-clip", type=float, default=200.0, help="Clip abs(values) for histograms (default 200)")
-    ap.add_argument("--diagnostics-dir", help="Directory for diagnostic rasters, CSVs, and plots")
 
     args = ap.parse_args(argv)
 
@@ -369,10 +368,6 @@ def main(argv=None) -> int:
     ed = args.end_date
     ws = args.window_start or sd[4:]
     we = args.window_end or ed[4:]
-    output_dir = Path.cwd()
-    diagnostics_dir = Path(args.diagnostics_dir) if args.diagnostics_dir else (output_dir / "diagnostics")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve SR db8 stacks
     if args.start_db8 and args.end_db8:
@@ -779,13 +774,17 @@ def main(argv=None) -> int:
     platform = m.group(1)   # e.g. sl8
     epsg = m.group(3)       # e.g. 32756
 
-    dll_path = output_dir / f"{platform}olre_{tile}_d{sd}{ed}_dll_e{epsg}.tif"
-    dlj_path = output_dir / f"{platform}olre_{tile}_d{sd}{ed}_dlj_e{epsg}.tif"
+    dll_path = f"{platform}olre_{tile}_d{sd}{ed}_dll_e{epsg}.tif"
+    dlj_path = f"{platform}olre_{tile}_d{sd}{ed}_dlj_e{epsg}.tif"
 
     # --------------------------------------------------
     # DIAGNOSTIC OUTPUT: raw combined index (UNSTRETCHED)
     # --------------------------------------------------
-    combined_img = diagnostics_dir / f"{platform}olre_{tile}_d{sd}{ed}_combined_raw_e{epsg}.tif"
+    diag_dir = Path.cwd() / "diagnostics"
+    print("diag dir: ", diag_dir)
+    diag_dir.mkdir(exist_ok=True)
+
+    combined_img = diag_dir / f"{platform}olre_{tile}_d{sd}{ed}_combined_raw_e{epsg}.tif"
 
     write_gtiff(
         str(combined_img),
@@ -835,10 +834,14 @@ def main(argv=None) -> int:
         )
         vals = ndviDiffStdErr[diag_mask]
 
+        diag_dir = Path.cwd() / "diagnostics"
+        print("diag dir: ", diag_dir)
+        diag_dir.mkdir(exist_ok=True)
+
         diag_name = f"{platform}olre_{tile}_d{sd}{ed}_{args.vi_tag}_e{epsg}"
 
-        stats_csv = diagnostics_dir / f"{diag_name}_ndviDiffStdErr_stats.csv"
-        bins_csv  = diagnostics_dir / f"{diag_name}_ndviDiffStdErr_bins.csv"
+        stats_csv = diag_dir / f"{diag_name}_ndviDiffStdErr_stats.csv"
+        bins_csv  = diag_dir / f"{diag_name}_ndviDiffStdErr_bins.csv"
 
         write_diag_stats_csv(vals, stats_csv)
         write_diag_bins_csv(vals, bins_csv, bins=args.diag_bins, clip_abs=args.diag_clip)
@@ -855,7 +858,7 @@ def main(argv=None) -> int:
             plt.axvline(2.5, linestyle="--")
             plt.axvline(-2.5, linestyle="--")
             plt.title("ndviDiffStdErr histogram (clipped)")
-            png_path = diagnostics_dir / f"{diag_name}_ndviDiffStdErr.png"
+            png_path = diag_dir / f"{diag_name}_ndviDiffStdErr.png"
             plt.savefig(png_path, dpi=150, bbox_inches="tight")
             plt.close()
             print(f"[DIAG] Histogram PNG: {png_path}")
@@ -919,11 +922,11 @@ def main(argv=None) -> int:
             "start_ndvi_date": start_ndvi_date,
             "end_ndvi_date": end_ndvi_date,
             "outputs": {
-                "dll": str(dll_path),
-                "dlj": str(dlj_path),
+                "dll": dll_path,
+                "dlj": dlj_path,
             },
         }
-        log_path = output_dir / f"{platform}olre_{tile}_d{sd}{ed}_dll_log_e{epsg}.json"
+        log_path = f"{platform}olre_{tile}_d{sd}{ed}_dll_log_e{epsg}.json"
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(log, f, indent=2)
         if args.verbose:

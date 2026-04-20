@@ -2,45 +2,42 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
+from dataclasses import dataclass
 import math
 import re
+import shutil
 from pathlib import Path
-from osgeo import gdal
 
 from tasks.task02_resolve_sr_dates import resolve_sr_start_end
 from tasks.task03_ensure_seasonal_ndvi import build_seasonal_ndvi_plan, ensure_seasonal_ndvi_in_s3
 from tasks.task04_build_ga0_sr_composite import build_ga0_sr_to_s3
-from tasks.task07_stage_ga1_locally import stage_ga1_ndvi_locally
 from tasks.task05_run_legacy_method import run_legacy_ndvi_window
 from tasks.task06_convert_and_upload_outputs import convert_outputs_to_cog_and_upload
+from tasks.task07_stage_ga1_locally import stage_ga1_ndvi_locally
 from tasks.task08_masks_and_vectors import make_masks_and_vectors
 
 
-"""Optimised EDS processing pipeline (NDVI seasonal-window; datacube-native)
+"""Optimised EDS processing pipeline (NDVI seasonal-window; datacube-native).
 
-This pipeline is meant to replace the older "eds_processing" script for the
-processing stage, but still keep the old logic basically the same.
+This pipeline keeps the existing scientific workflow but writes all local and S3
+artifacts into a single run-scoped layout.
 
-Key ideas
-- Reuse NDVI (ga1) COGs that are already in S3 (made by optimised_ndvi).
-- Only build the start/end SR stacks (ga0) that we actually need for the dates.
-- Run the legacy seasonal-window method (same thresholds/logic, not rewriting it).
-- Convert the old outputs to Cloud-Optimised GeoTIFFs (COGs) and push to S3.
+Local run layout:
+  <work-dir>/<tile>/<run-tag>/
+    ndvi_work/
+    ga1_stage/
+    ga0_work/
+    legacy_outputs/
+    outputs_cog/
+    maskvec_work/
+    diagnostics/
+    sr_raw_cog/          # optional
 
-Example
-python /home/jovyan/work-easi-eds/scripts/easi-scripts/optimised_processing/scripts/eds_master_pipeline_optimised.py \
-  --tile p089r078 \
-  --start-date 2023-03-06 \
-  --end-date 2023-10-24 \
-  --s3-bucket dcceew-eds-data \
-  --s3-prefix "AROAZ6PFZYT4B4C7MNRHV:robotmcgregor/eds/optimised" \
-  --work-dir /home/jovyan/scratch/eds-work-processing \
-  --cloud-max 40 \
-  --lookback 10 \
-  --copy-to-home \
-#   --zip-home
-
+S3 layout:
+  Scene-date outputs:
+    {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/...
+  Final run outputs:
+    {s3_prefix}/tiles/{tile}/outputs/{run_tag}/...
 """
 
 
@@ -59,7 +56,6 @@ def parse_args():
 
     ap.add_argument('--cloud-max', type=float, default=40.0)
 
-    # datacube products
     ap.add_argument('--sr-products', nargs='+', default=['ga_ls8c_ard_3', 'ga_ls9c_ard_3'])
     ap.add_argument('--ndvi-products', nargs='+', default=['ga_ls8c_ard_3', 'ga_ls9c_ard_3'])
 
@@ -75,92 +71,98 @@ def parse_args():
     ap.add_argument('--diagnostics', action='store_true')
     ap.add_argument('--verbose', action='store_true')
 
-    # output tagging
     ap.add_argument('--run-tag', default=None, help='Optional run tag for output folder (default: tile_d<start><end>)')
 
-    # NDVI Clear and MAsk itemsparser.add_argument("--strong-threshold", type=int, default=60)
-    ap.add_argument("--strong-threshold", type=int, default=60)
-    ap.add_argument("--clear-threshold", type=int, default=80)
-    ap.add_argument("--min-area-ha", type=float, default=10.0)
+    ap.add_argument('--strong-threshold', type=int, default=60)
+    ap.add_argument('--clear-threshold', type=int, default=80)
+    ap.add_argument('--min-area-ha', type=float, default=10.0)
 
-    # Results to home
     ap.add_argument(
-        "--copy-to-home",
-        action="store_true",
-        help="Copy ga0 + outputs + masks + shapefiles to a folder under /home/jovyan for easy retrieval.",
-        )
+        '--copy-to-home',
+        action='store_true',
+        help='Copy ga0 + outputs + masks + shapefiles to a folder under /home/jovyan for easy retrieval.',
+    )
     ap.add_argument(
-        "--home-out-dir",
-        default="/home/jovyan/eds-outputs",
-        help="Base folder for --copy-to-home outputs (default: /home/jovyan/eds-outputs).",
+        '--home-out-dir',
+        default='/home/jovyan/eds-outputs',
+        help='Base folder for --copy-to-home outputs (default: /home/jovyan/eds-outputs).',
+    )
+    ap.add_argument(
+        '--zip-home',
+        action='store_true',
+        help='Zip the copied home output folder after copying.',
     )
 
     ap.add_argument(
-        "--zip-home",
-        action="store_true",
-        help="Zip the copied home output folder after copying."
-    )
-
-    # Save out unmasked SR cogs
-    ap.add_argument(
-        "--export-sr-raw-cog",
-        action="store_true",
-        help="Export the *unmasked* SR composites (start/end) as Cloud Optimised GeoTIFFs (COGs).",
+        '--export-sr-raw-cog',
+        action='store_true',
+        help='Copy the unmasked SR composites into a run-scoped sr_raw_cog folder.',
     )
     ap.add_argument(
-        "--export-sr-raw-cog-dirname",
-        default="sr_raw_cog",
-        help="Subfolder under <out-root>/<scene>/ to write SR raw COGs (default: sr_raw_cog).",
+        '--export-sr-raw-cog-dirname',
+        default='sr_raw_cog',
+        help='Subfolder under the run root for exported SR raw COGs (default: sr_raw_cog).',
     )
 
     return ap.parse_args()
 
 
+@dataclass(frozen=True)
+class RunPaths:
+    run_root: Path
+    ndvi_work: Path
+    ga1_stage: Path
+    ga0_work: Path
+    legacy_outputs: Path
+    outputs_cog: Path
+    maskvec_work: Path
+    diagnostics: Path
+    sr_raw_cog: Path
+
+    @classmethod
+    def from_args(cls, args, tile: str, run_tag: str) -> 'RunPaths':
+        run_root = Path(args.work_dir) / tile / run_tag
+        return cls(
+            run_root=run_root,
+            ndvi_work=run_root / 'ndvi_work',
+            ga1_stage=run_root / 'ga1_stage',
+            ga0_work=run_root / 'ga0_work',
+            legacy_outputs=run_root / 'legacy_outputs',
+            outputs_cog=run_root / 'outputs_cog',
+            maskvec_work=run_root / 'maskvec_work',
+            diagnostics=run_root / 'diagnostics',
+            sr_raw_cog=run_root / args.export_sr_raw_cog_dirname,
+        )
+
+    def ensure_directories(self, include_sr_raw_cog: bool = False) -> None:
+        directories = [
+            self.run_root,
+            self.ndvi_work,
+            self.ga1_stage,
+            self.ga0_work,
+            self.legacy_outputs,
+            self.outputs_cog,
+            self.maskvec_work,
+            self.diagnostics,
+        ]
+        if include_sr_raw_cog:
+            directories.append(self.sr_raw_cog)
+
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
 
 
+def _copy_run_artifact(src: Path, dst_dir: Path) -> Path:
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst = dst_dir / src.name
+    if src.resolve() != dst.resolve():
+        shutil.copy2(src, dst)
+    return dst
 
-def _prefer_unmasked_sr(sr_path: str) -> str:
-    """
-    If sr_path points at *_clr.tif and the non-clr sibling exists, return that.
-    Otherwise return sr_path unchanged.
-    """
-    p = Path(sr_path)
-    name = p.name
-    if name.endswith("_clr.tif"):
-        cand = p.with_name(name.replace("_clr.tif", ".tif"))
-        if cand.exists():
-            return str(cand)
-    return sr_path
-
-def _write_cog(src: str, dst: str) -> None:
-    """
-    Write a COG using GDAL. Keeps datatype/bands; uses DEFLATE compression.
-    """
-    Path(dst).parent.mkdir(parents=True, exist_ok=True)
-
-    co = [
-        "COMPRESS=DEFLATE",
-        "PREDICTOR=2",
-        "BIGTIFF=IF_SAFER",
-        "NUM_THREADS=ALL_CPUS",
-    ]
-
-    # GDAL COG driver builds overviews by default
-    out = gdal.Translate(
-        destName=dst,
-        srcDS=src,
-        format="COG",
-        creationOptions=co,
-    )
-    if out is None:
-        raise RuntimeError(f"COG write failed: {src} -> {dst}")
-    out = None
 
 def _norm_yyyymmdd(iso: str) -> str:
     y, m, d = iso.split('-')
     return f'{y}{m}{d}'
-
-
 
 
 def _extract_epsg(value) -> int | None:
@@ -177,11 +179,11 @@ def _extract_epsg(value) -> int | None:
     if s.isdigit():
         return int(s)
 
-    m = re.search(r"EPSG[:= ]*(\d+)", s, flags=re.IGNORECASE)
+    m = re.search(r'EPSG[:= ]*(\d+)', s, flags=re.IGNORECASE)
     if m:
         return int(m.group(1))
 
-    m = re.search(r"\b(\d{4,6})\b", s)
+    m = re.search(r'\b(\d{4,6})\b', s)
     if m:
         return int(m.group(1))
 
@@ -193,6 +195,7 @@ def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
     if lat >= 0:
         return 32600 + zone
     return 32700 + zone
+
 
 def resolve_output_epsg_from_row(row, cli_target_epsg: int) -> int:
     """
@@ -206,56 +209,46 @@ def resolve_output_epsg_from_row(row, cli_target_epsg: int) -> int:
 
     def _row_get(r, key, default=None):
         try:
-            if hasattr(r, "__contains__") and key in r:
+            if hasattr(r, '__contains__') and key in r:
                 return r[key]
         except Exception:
             pass
         return getattr(r, key, default)
 
-    lon_min = _row_get(row, "lon_min")
-    lon_max = _row_get(row, "lon_max")
-    lat_min = _row_get(row, "lat_min")
-    lat_max = _row_get(row, "lat_max")
+    lon_min = _row_get(row, 'lon_min')
+    lon_max = _row_get(row, 'lon_max')
+    lat_min = _row_get(row, 'lat_min')
+    lat_max = _row_get(row, 'lat_max')
 
     if None not in (lon_min, lon_max, lat_min, lat_max):
+        assert lon_min is not None and lon_max is not None
+        assert lat_min is not None and lat_max is not None
         centre_lon = (float(lon_min) + float(lon_max)) / 2.0
         centre_lat = (float(lat_min) + float(lat_max)) / 2.0
         return derive_target_epsg_wgs84_utm_from_lonlat(centre_lon, centre_lat)
 
-    for attr in ["target_epsg", "native_epsg", "epsg", "crs_epsg", "crs"]:
+    for attr in ['target_epsg', 'native_epsg', 'epsg', 'crs_epsg', 'crs']:
         epsg = _extract_epsg(_row_get(row, attr))
         if epsg:
             return epsg
 
-    raise ValueError("Could not resolve target EPSG from row")
+    raise ValueError('Could not resolve target EPSG from row')
 
 
 def main():
     args = parse_args()
     tile = args.tile.lower().strip()
-    work_dir = Path(args.work_dir) / tile
-    work_dir.mkdir(parents=True, exist_ok=True)
 
     sd = _norm_yyyymmdd(args.start_date)
     ed = _norm_yyyymmdd(args.end_date)
-
     run_tag = args.run_tag or f'{tile}_d{sd}{ed}'
 
-    # import sys
-    # sys.exit("stop here....")
+    paths = RunPaths.from_args(args, tile=tile, run_tag=run_tag)
+    paths.ensure_directories(include_sr_raw_cog=bool(args.export_sr_raw_cog))
 
-    # ------------------------------------------------------------
-    # 1) Resolve SR start/end dates (cloud metadata <= cloud_max)
-    # ------------------------------------------------------------
-    # sr = resolve_sr_start_end(
-    #     tile=tile,
-    #     tile_shp=args.tile_shp,
-    #     products=args.sr_products,
-    #     cloud_max=float(args.cloud_max),
-    #     start_date=args.start_date,
-    #     end_date=args.end_date,
-    #     target_epsg=int(args.target_epsg),
-    # )
+    print(f'[INFO] Local run root: {paths.run_root}')
+    print(f"[INFO] Run outputs S3 prefix: {args.s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}")
+
     sr = resolve_sr_start_end(
         tile=tile,
         tile_shp=args.tile_shp,
@@ -265,16 +258,14 @@ def main():
         end_date=args.end_date,
     )
 
-    # Force final output EPSG policy here:
-    # explicit CLI override, otherwise WGS84 UTM from bbox centre.
     sr_start_epsg = resolve_output_epsg_from_row(sr.start_row, args.target_epsg)
     sr_end_epsg = resolve_output_epsg_from_row(sr.end_row, args.target_epsg)
 
-    sr.start_row["target_epsg"] = int(sr_start_epsg)
-    sr.end_row["target_epsg"] = int(sr_end_epsg)
+    sr.start_row['target_epsg'] = int(sr_start_epsg)
+    sr.end_row['target_epsg'] = int(sr_end_epsg)
 
-    print(f"[INFO] Forced SR start target_epsg: {sr_start_epsg}")
-    print(f"[INFO] Forced SR end   target_epsg: {sr_end_epsg}")
+    print(f'[INFO] Forced SR start target_epsg: {sr_start_epsg}')
+    print(f'[INFO] Forced SR end   target_epsg: {sr_end_epsg}')
 
     eff_sd = str(sr.start_row.date)
     eff_ed = str(sr.end_row.date)
@@ -282,11 +273,6 @@ def main():
     print(f"[INFO] Effective SR start: {eff_sd} (product={sr.start_row['product']}, cloud={float(sr.start_row['cloud']):.2f})")
     print(f"[INFO] Effective SR end:   {eff_ed} (product={sr.end_row['product']}, cloud={float(sr.end_row['cloud']):.2f})")
 
-    # import sys
-    # sys.exit("stop here....")
-    # ------------------------------------------------------------
-    # 2) Build + ensure seasonal NDVI (ga1) in S3 across lookback
-    # ------------------------------------------------------------
     plan = build_seasonal_ndvi_plan(
         tile=tile,
         tile_shp=args.tile_shp,
@@ -298,22 +284,18 @@ def main():
         target_epsg=int(args.target_epsg),
     )
 
-
-    # Force the same EPSG policy onto all required NDVI rows
     if len(plan.required_rows) > 0:
-        plan.required_rows["target_epsg"] = plan.required_rows.apply(
+        plan.required_rows['target_epsg'] = plan.required_rows.apply(
             lambda r: derive_target_epsg_wgs84_utm_from_lonlat(
-                (float(r["lon_min"]) + float(r["lon_max"])) / 2.0,
-                (float(r["lat_min"]) + float(r["lat_max"])) / 2.0,
+                (float(r['lon_min']) + float(r['lon_max'])) / 2.0,
+                (float(r['lat_min']) + float(r['lat_max'])) / 2.0,
             ) if not (args.target_epsg and int(args.target_epsg) > 0)
             else int(args.target_epsg),
             axis=1,
         )
 
-    print("[DEBUG] NDVI plan target_epsg sample:")
-    print(plan.required_rows[["date", "platform", "target_epsg"]].head())
-
-
+    print('[DEBUG] NDVI plan target_epsg sample:')
+    print(plan.required_rows[['date', 'platform', 'target_epsg']].head())
     print(f'[INFO] Seasonal window: {plan.window.window_start_mmdd} -> {plan.window.window_end_mmdd} (months {plan.window.months_hint()})')
     print(f'[INFO] NDVI scenes in seasonal plan: {len(plan.required_rows)}')
 
@@ -322,7 +304,7 @@ def main():
         tile=tile,
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
-        work_dir=work_dir / 'ndvi_work',
+        work_dir=paths.ndvi_work,
         cloud_max=float(args.cloud_max),
         resolution=float(args.resolution),
         rebase=bool(args.rebase),
@@ -330,13 +312,9 @@ def main():
         dask_chunk=int(args.chunk),
     )
 
-    # import sys
-    # sys.exit("stop here....")
-    # Stage required NDVI locally for the legacy method
     required_dates = []
     for r in plan.required_rows.itertuples(index=False):
-        required_dates.append((str(r.date), str(r.platform), int(r.target_epsg)))
-
+        required_dates.append((str(r.date), str(r.platform), int(str(r.target_epsg))))
 
     if args.dry_run:
         print('[DRY] Skipping ga1 NDVI staging (download).')
@@ -344,105 +322,68 @@ def main():
         print('[DRY] Skipping legacy method run + output conversion.')
         return
 
-    # import sys
-    # sys.exit("task 7 start....")
     ga1_dir = stage_ga1_ndvi_locally(
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
         tile=tile,
         required_dates=required_dates,
-        work_dir=work_dir,
+        work_dir=paths.ga1_stage,
         dry_run=bool(args.dry_run),
     )
 
-
-
-
-    # ------------------------------------------------------------
-    # 3) Build ga0 SR composites for start/end
-    # ------------------------------------------------------------
     ga0_start = build_ga0_sr_to_s3(
         tile=tile,
         date=eff_sd,
-        platform=str(sr.start_row["platform"]),
-        product=str(sr.start_row["product"]),
-        lon_min=float(sr.start_row["lon_min"]),
-        lat_min=float(sr.start_row["lat_min"]),
-        lon_max=float(sr.start_row["lon_max"]),
-        lat_max=float(sr.start_row["lat_max"]),
-        target_epsg=int(sr.start_row["target_epsg"]),
+        platform=str(sr.start_row['platform']),
+        product=str(sr.start_row['product']),
+        lon_min=float(sr.start_row['lon_min']),
+        lat_min=float(sr.start_row['lat_min']),
+        lon_max=float(sr.start_row['lon_max']),
+        lat_max=float(sr.start_row['lat_max']),
+        target_epsg=int(sr.start_row['target_epsg']),
         cloud_max=float(args.cloud_max),
         bucket=args.s3_bucket,
         s3_prefix=args.s3_prefix,
-        work_dir=work_dir / 'ga0_work',
+        work_dir=paths.ga0_work,
         resolution=float(args.resolution),
         dask_chunk=int(args.chunk),
         rebase=bool(args.rebase),
         dry_run=bool(args.dry_run),
     )
 
-    # import sys
-    # sys.exit("stop here after Build ga0 SR composites...")
     ga0_end = build_ga0_sr_to_s3(
         tile=tile,
         date=eff_ed,
-        platform=str(sr.end_row["platform"]),
-        product=str(sr.end_row["product"]),
-        lon_min=float(sr.end_row["lon_min"]),
-        lat_min=float(sr.end_row["lat_min"]),
-        lon_max=float(sr.end_row["lon_max"]),
-        lat_max=float(sr.end_row["lat_max"]),
-        target_epsg=int(sr.end_row["target_epsg"]),
+        platform=str(sr.end_row['platform']),
+        product=str(sr.end_row['product']),
+        lon_min=float(sr.end_row['lon_min']),
+        lat_min=float(sr.end_row['lat_min']),
+        lon_max=float(sr.end_row['lon_max']),
+        lat_max=float(sr.end_row['lat_max']),
+        target_epsg=int(sr.end_row['target_epsg']),
         cloud_max=float(args.cloud_max),
         bucket=args.s3_bucket,
         s3_prefix=args.s3_prefix,
-        work_dir=work_dir / 'ga0_work',
+        work_dir=paths.ga0_work,
         resolution=float(args.resolution),
         dask_chunk=int(args.chunk),
         rebase=bool(args.rebase),
         dry_run=bool(args.dry_run),
     )
 
+    print('ga0_start.local_clr_path:', ga0_start.local_clr_path)
+    print('ga0_start exists:', Path(ga0_start.local_clr_path).exists())
+    print('ga0_end.local_clr_path:', ga0_end.local_clr_path)
+    print('ga0_end exists:', Path(ga0_end.local_clr_path).exists())
 
+    if args.export_sr_raw_cog:
+        exported_start = _copy_run_artifact(Path(ga0_start.local_raw_path), paths.sr_raw_cog)
+        exported_end = _copy_run_artifact(Path(ga0_end.local_raw_path), paths.sr_raw_cog)
+        print(f'[SR-RAW-COG] start -> {exported_start}')
+        print(f'[SR-RAW-COG] end   -> {exported_end}')
 
-    print("ga0_start.local_clr_path:", ga0_start.local_clr_path)
-    print("ga0_start exists:", Path(ga0_start.local_clr_path).exists())
-
-    print("ga0_end.local_clr_path:", ga0_end.local_clr_path)
-    print("ga0_end exists:", Path(ga0_end.local_clr_path).exists())
-
-    # import sys
-    # sys.exit("forced stop GA all")
-
-    # ------------------------------------------------------------
-    # 4) (NEW) Export unmasked SR (ga0) as COGs (start/end)
-    # ------------------------------------------------------------
-    # if args.export_sr_raw_cog:
-    #     sr_raw_dir = work_dir / args.export_sr_raw_cog_dirname  # e.g. <work>/<tile>/sr_raw_cog
-
-    #     # These are the SR composites you already built (ga0)
-    #     sr_start_path = str(ga0_start.local_path)
-    #     sr_end_path   = str(ga0_end.local_path)
-
-    #     raw_start = _prefer_unmasked_sr(sr_start_path)
-    #     raw_end   = _prefer_unmasked_sr(sr_end_path)
-
-    #     start_cog = sr_raw_dir / f"{tile}_{eff_sd}_sr_raw_cog.tif"
-    #     end_cog   = sr_raw_dir / f"{tile}_{eff_ed}_sr_raw_cog.tif"
-
-    #     print(f"[SR-RAW-COG] start: {raw_start} -> {start_cog}")
-    #     print(f"[SR-RAW-COG] end  : {raw_end} -> {end_cog}")
-
-    #     if not args.dry_run:
-    #         _write_cog(raw_start, str(start_cog))
-    #         _write_cog(raw_end, str(end_cog))
-
-    # ------------------------------------------------------------
-    # 5) Run legacy method + convert outputs to COG
-    # ------------------------------------------------------------
-
-    print(f"[INFO] Using start db8 masked stack: {ga0_start.local_clr_path}")
-    print(f"[INFO] Using end   db8 masked stack: {ga0_end.local_clr_path}")
+    print(f'[INFO] Using start db8 masked stack: {ga0_start.local_clr_path}')
+    print(f'[INFO] Using end   db8 masked stack: {ga0_end.local_clr_path}')
 
     outputs = run_legacy_ndvi_window(
         methods_dir=Path(__file__).parent / 'methods',
@@ -458,16 +399,9 @@ def main():
         diagnostics=bool(args.diagnostics),
         verbose=bool(args.verbose),
         vi_tag='vi-ndvi',
-        home_out_dir=Path(args.home_out_dir),
+        output_dir=paths.legacy_outputs,
+        diagnostics_dir=paths.diagnostics,
     )
-
-    print("eff_sd: ", eff_sd)
-    print("eff_ed: ", eff_ed)
-    print("start_ga0: ", ga0_start.local_clr_path)
-    print("end_ga0: ", ga0_end.local_clr_path)
-
-    import sys
-    sys.exit("start and stop date time...")
 
     converted = convert_outputs_to_cog_and_upload(
         dll_src_img=outputs.dll_img,
@@ -477,23 +411,14 @@ def main():
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
         tile=tile,
-        run_tag=f"d{eff_sd}{eff_ed}", 
-        work_dir=scene_work_dir / "outputs_cog",
+        run_tag=run_tag,
+        work_dir=paths.outputs_cog,
     )
 
     dljmz_cog_local = Path(converted.dljmz_cog_local)
 
-
-    import sys
-    sys.exit("WTF ...")
-
     for u in converted.uploaded:
-        print("[OK]", u.s3_uri)
-
-    # ------------------------------------------------------------
-    # 5) Build strong/clear masks + polygonise to shapefiles
-    # ------------------------------------------------------------
-    from tasks.task08_masks_and_vectors import make_masks_and_vectors
+        print('[OK]', u.s3_uri)
 
     mv = make_masks_and_vectors(
         dljmz_cog_local=dljmz_cog_local,
@@ -501,78 +426,52 @@ def main():
         s3_prefix=args.s3_prefix,
         tile=tile,
         run_tag=run_tag,
-        strong_threshold=int(args.strong_threshold),  # 60
-        clear_threshold=int(args.clear_threshold),    # 80
-        min_area_ha=float(args.min_area_ha),          # default 10.0
-        work_dir=work_dir / "maskvec_work",
+        strong_threshold=int(args.strong_threshold),
+        clear_threshold=int(args.clear_threshold),
+        min_area_ha=float(args.min_area_ha),
+        work_dir=paths.maskvec_work,
         rebase=bool(args.rebase),
         dry_run=bool(args.dry_run),
     )
 
-    print(f"[OK] Strong mask -> s3://{args.s3_bucket}/{mv.strong_mask_s3}")
-    print(f"[OK] Clear  mask -> s3://{args.s3_bucket}/{mv.clear_mask_s3}")
-    print(f"[OK] Strong SHP  -> s3://{args.s3_bucket}/{mv.strong_shp_s3_prefix}/")
-    print(f"[OK] Clear  SHP  -> s3://{args.s3_bucket}/{mv.clear_shp_s3_prefix}/")
-    # import sys
-    # sys.exit("stop here after 5 run legacy...")
-    # ------------------------------------------------------------
-    # 6) Copy artefacts to /home/jovyan
-    # ------------------------------------------------------------
+    print(f'[OK] Strong mask -> s3://{args.s3_bucket}/{mv.strong_mask_s3}')
+    print(f'[OK] Clear  mask -> s3://{args.s3_bucket}/{mv.clear_mask_s3}')
+    print(f'[OK] Strong SHP  -> s3://{args.s3_bucket}/{mv.strong_shp_s3_prefix}/')
+    print(f'[OK] Clear  SHP  -> s3://{args.s3_bucket}/{mv.clear_shp_s3_prefix}/')
+
     if bool(args.copy_to_home):
         from tasks.task09_copy_run_to_home import copy_run_to_home
 
-        # Legacy ENVI outputs: include .img and .hdr if present
         legacy_files = [Path(outputs.dll_img), Path(outputs.dlj_img)]
         for p in list(legacy_files):
-            hdr = p.with_suffix(".hdr")
+            hdr = p.with_suffix('.hdr')
             if hdr.exists():
                 legacy_files.append(hdr)
 
-        # COG outputs from conversion
         cog_files = [
             Path(converted.dllmz_cog_local),
             Path(converted.dljmz_cog_local),
         ]
-
-        # Masks (local) from mv
         mask_files = [Path(mv.strong_mask_local), Path(mv.clear_mask_local)]
-
-        # Vector dirs used by task08 (these are the local dirs we wrote into)
         vector_dirs = [
-            (work_dir / "maskvec_work" / "vectors" / "strong"),
-            (work_dir / "maskvec_work" / "vectors" / "clear"),
+            paths.maskvec_work / 'vectors' / 'strong',
+            paths.maskvec_work / 'vectors' / 'clear',
         ]
 
-
-        print("start_ga0: ", ga0_start.local_clr_path)
-        print("end_ga0: ", ga0_end.local_clr_path)
-
-        # print("local_clr_path: ", local_clr_path)
-        # print("local_path: ", local_path)
-
-        # import sys
-        # sys.exit("WTF2 ...")
-
         copy_run_to_home(
-        run_tag=run_tag,
-        home_out_dir=Path(args.home_out_dir),
-        # ga0_start_local=Path(ga0_start.local_path),
-        # ga0_end_local=Path(ga0_end.local_path),
-        ga0_start_local=Path(ga0_start.local_clr_path),
-        ga0_end_local=Path(ga0_end.local_clr_path),
-        legacy_outputs=legacy_files,
-        cog_outputs=cog_files,
-        mask_outputs=mask_files,
-        vector_dirs=vector_dirs,
-        zip_after=bool(args.zip_home),
-        dry_run=bool(args.dry_run),
-    )
+            run_tag=run_tag,
+            home_out_dir=Path(args.home_out_dir),
+            ga0_start_local=Path(ga0_start.local_clr_path),
+            ga0_end_local=Path(ga0_end.local_clr_path),
+            legacy_outputs=legacy_files,
+            cog_outputs=cog_files,
+            mask_outputs=mask_files,
+            vector_dirs=vector_dirs,
+            zip_after=bool(args.zip_home),
+            dry_run=bool(args.dry_run),
+        )
 
-    # import sys
-    # sys.exit("WTF3 ...")
-
-    print("[DONE] Optimised EDS processing complete.")
-
+    print('[DONE] Optimised EDS processing complete.')
 
 
 if __name__ == '__main__':

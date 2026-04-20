@@ -29,8 +29,6 @@ def run_legacy_ndvi_window(
     diagnostics: bool = False,
     verbose: bool = False,
     vi_tag: str = "vi-ndvi",
-    output_dir: Path | None = None,
-    diagnostics_dir: Path | None = None,
     home_out_dir: str | Path | None = None,
 ) -> LegacyOutputs:
     script = Path(methods_dir) / "legacy_window_ndvi_envi.py"
@@ -42,11 +40,6 @@ def run_legacy_ndvi_window(
     print("end_ga0: ", end_ga0)
 
     tile = scene.lower()
-    output_dir = Path(output_dir) if output_dir is not None else Path.cwd()
-    diagnostics_dir = Path(diagnostics_dir) if diagnostics_dir is not None else output_dir / "diagnostics"
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
     # Final desired output naming derived from end GA0
     end_name = Path(end_ga0).name
@@ -57,13 +50,13 @@ def run_legacy_ndvi_window(
     platform = m.group(1)
     target_epsg = m.group(3)
 
-    dll_img = output_dir / (
+    dll_img = Path(
         f"{platform}olre_{tile}_d{start_date}{end_date}_dll_e{target_epsg}.tif"
     )
-    dlj_img = output_dir / (
+    dlj_img = Path(
         f"{platform}olre_{tile}_d{start_date}{end_date}_dlj_e{target_epsg}.tif"
     )
-    log_json = output_dir / (
+    log_json = Path(
         f"{platform}olre_{tile}_d{start_date}{end_date}_dll_log_e{target_epsg}.json"
     )
 
@@ -86,7 +79,6 @@ def run_legacy_ndvi_window(
         "--window-end", window_end_mmdd,
         "--lookback", str(int(lookback)),
         "--vi-tag", vi_tag,
-        "--diagnostics-dir", str(diagnostics_dir),
     ]
 
     if verbose:
@@ -95,7 +87,7 @@ def run_legacy_ndvi_window(
         cmd.append("--diagnostics")
 
     print("[RUN]", " ".join(cmd))
-    subprocess.check_call(cmd, cwd=output_dir)
+    subprocess.check_call(cmd)
 
     return LegacyOutputs(
         dll_img=dll_img,

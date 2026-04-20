@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -60,11 +61,14 @@ def build_ga0_sr_to_s3(
 ) -> ga0Output:
     """Create a 6-band SR stack ("ga0") for one scene date and upload it to S3.
 
-        Local temporary and final files stay under the supplied work_dir.
+    What it does:
+    - load the SR bands + oa_fmask for the date
+    - if multiple slices come back, pick the best one based on clear land % (oa_fmask == 1)
+    - mask anything thats not clear to nodata
+    - write a geotiff and then convert to a COG (should be lossless)
 
-        S3 output layout:
-            {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga0_e{epsg}.tif
-            {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga0-clr_e{epsg}.tif
+    Output layout:
+    {s3_prefix}/tiles/{tile}/ga0/{platform}/{YYYY}/{YYYYMMDD}/lztmre_{tile}_{YYYYMMDD}_ga0_{epsg}.tif
     """
     import datacube
     import re
@@ -99,6 +103,8 @@ def build_ga0_sr_to_s3(
     local_raw_cog = work_dir / fname_raw
     local_clr_cog = work_dir / fname_clr
 
+    # if not rebase and s3_key_exists(bucket, out_key):
+    #     return ga0Output(local_path=local_cog, s3_key=out_key, date=date, platform=platform, product=product, target_epsg=int(target_epsg))
     if (
         not rebase
         and s3_key_exists(bucket, raw_key)
@@ -121,10 +127,14 @@ def build_ga0_sr_to_s3(
             target_epsg=int(target_epsg),
         )
 
-    if not rebase and s3_key_exists(bucket, raw_key) and s3_key_exists(bucket, clr_key):
-        print("[WARN] GA0 exists in S3 but not locally. Rebuilding local run copies.")
-        print(f"       expected RAW: {local_raw_cog}")
-        print(f"       expected CLR: {local_clr_cog}")
+        if (
+            not rebase
+            and s3_key_exists(bucket, raw_key)
+            and s3_key_exists(bucket, clr_key)
+        ):
+            print("[WARN] GA0 exists in S3 but not locally — rebuilding locally")
+            print(f"       expected RAW: {local_raw_cog}")
+            print(f"       expected CLR: {local_clr_cog}")
 
     if dry_run:
         print(f"[DRY] ga0 SR RAW {tile} {platform} {date} -> s3://{bucket}/{raw_key}")
@@ -140,6 +150,8 @@ def build_ga0_sr_to_s3(
             target_epsg=int(target_epsg),
         )
 
+    # import sys
+    # sys.exit("break here")    
     dc = datacube.Datacube(app='optimised_processing_ga0')
 
     t0 = f"{date[:4]}-{date[4:6]}-{date[6:]}"
@@ -201,6 +213,43 @@ def build_ga0_sr_to_s3(
         v = valid_mask(oa)
         return (oa == LAND_CLEAR_VALUE) & v
 
+
+
+
+    # # choose best time slice by clear land%
+    # oa = ds['oa_fmask']
+    # v = valid_mask(oa)
+    # lc = land_clear_mask(oa)
+    # valid_count = v.sum(dim=('y', 'x'))
+    # clear_count = lc.sum(dim=('y', 'x'))
+    # frac = (clear_count / valid_count).where(valid_count > 0)
+    # frac = frac.compute()
+    # if bool(frac.isnull().all()):
+    #     raise RuntimeError(f"land-clear% all-NaN for {tile} {date} ({product})")
+
+    # frac_filled = frac.fillna(-1.0)
+    # best_i = int(frac_filled.argmax(dim='time').values)
+    # print(f"[DEBUG] chosen platform={platform}")
+    # print(f"[DEBUG] output RAW path={local_raw_cog}")
+    # print(f"[DEBUG] output CLR path={local_clr_cog}")
+
+    # # still compute clear mask for QA / best-slice selection if you want
+    # clear_mask = land_clear_mask(oa.isel(time=best_i))
+
+    # # pull bands
+    # bands = []
+    # for b in SR_BANDS:
+    #     bands.append(ds[b].isel(time=best_i).astype('float32'))
+
+    # # ga0 = unmasked nbart composite
+    # nodata = np.float32(-9999.0)
+    # # compute to numpy
+    # arrs = [b.compute().values for b in bands]
+    # stack = np.stack(arrs, axis=0).astype('float32')
+
+    # # bands = [band.where(clear_mask, other=nodata) for band in bands]
+
+
     # choose best time slice by clear land%
     oa = ds['oa_fmask']
     v = valid_mask(oa)
@@ -228,6 +277,18 @@ def build_ga0_sr_to_s3(
 
     # still compute clear mask for QA / best-slice selection
     clear_mask = land_clear_mask(oa.isel(time=best_i))
+
+    # pull bands for chosen slice
+    bands = []
+    for b in SR_BANDS:
+        bands.append(ds[b].isel(time=best_i).astype('float32'))
+
+    # ga0 = unmasked nbart composite
+    nodata = np.float32(-9999.0)
+
+    # compute to numpy
+    arrs = [b.compute().values for b in bands]
+    stack = np.stack(arrs, axis=0).astype('float32')
 
     # unmasked bands
     bands_raw = []
@@ -316,6 +377,7 @@ def build_ga0_sr_to_s3(
         except Exception:
             pass
 
+    # return ga0Output(local_path=local_cog, s3_key=out_key, date=date, platform=platform, product=product, target_epsg=int(target_epsg))
     return ga0Output(
         local_raw_path=local_raw_cog,
         local_clr_path=local_clr_cog,

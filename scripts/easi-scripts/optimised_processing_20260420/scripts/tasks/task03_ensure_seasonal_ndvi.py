@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Set
 
 import pandas as pd
 
@@ -105,9 +105,7 @@ def ensure_seasonal_ndvi_in_s3(
 ) -> None:
     """Ensure all NDVI outputs required by the seasonal plan exist in S3.
 
-        Canonical output layout:
-            {prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga1-clr_e{epsg}.tif
-            {prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga2_e{epsg}.tif
+    Uses the same output layout as optimised_ndvi.
     """
     tile = tile.lower().strip()
     work_dir = Path(work_dir)
@@ -119,14 +117,31 @@ def ensure_seasonal_ndvi_in_s3(
         product = str(row.product)
         target_epsg = int(row.target_epsg)
 
+        out_dir = f"{prefix.rstrip('/')}/tiles/{tile}/ndvi/{platform}/{yyyymmdd[:4]}/{yyyymmdd}"
+        ndvi_key = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ndvi_e{target_epsg}.tif"
+        fmk_key = f"{out_dir}/lztmre_{tile}_{yyyymmdd}_ffmask_e{target_epsg}.tif"
+
+        print("out_dir: ", out_dir)
+        print("ndvi_key: ", ndvi_key)
+        print("fmk_key : ", fmk_key)
+
         out_dir = f"{prefix.rstrip('/')}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymmdd}"
         ndvi_key = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga1-clr_e{target_epsg}.tif"
         fmk_key = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga2_e{target_epsg}.tif"
+
+        print("out_dir: ", out_dir)
+        print("ndvi_key: ", ndvi_key)
+        print("fmk_key : ", fmk_key)
+        # import sys
+        # sys.exit("print ndvi file names")
 
         print(f"[DEBUG] checking S3 for {yyyymmdd} {platform}")
         print(f"[DEBUG] ndvi_key = s3://{bucket}/{ndvi_key}")
         print(f"[DEBUG] fmk_key  = s3://{bucket}/{fmk_key}")
 
+        # if not rebase:
+        #     if s3_key_exists(bucket, ndvi_key) and s3_key_exists(bucket, fmk_key):
+        #         continue
         ndvi_exists = s3_key_exists(bucket, ndvi_key)
         fmk_exists = s3_key_exists(bucket, fmk_key)
 

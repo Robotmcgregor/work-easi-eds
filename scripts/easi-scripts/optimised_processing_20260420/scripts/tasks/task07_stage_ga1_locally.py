@@ -15,18 +15,21 @@ def stage_ga1_ndvi_locally(
     dry_run: bool = False,
 ) -> Path:
     """
-    Download required NDVI COGs from S3 into the supplied canonical staging directory.
+    Download required NDVI COGs from S3 to a local folder.
     required_dates: list of (YYYYMMDD, platform, epsg)
     Returns the local directory containing the files.
     """
     tile = tile.lower().strip()
     work_dir = Path(work_dir)
-    out_dir = work_dir
+    out_dir = work_dir / "ga1_ndvi"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("[DEBUG] required_dates passed to stage_ga1_ndvi_locally:")
     for item in required_dates:
         print("   ", item)
+
+    # import sys
+    # sys.exit("2026 missing")
 
     for yyyymmdd, platform, epsg in required_dates:
         platform_str = str(platform).strip().lower()
