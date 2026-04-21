@@ -463,12 +463,18 @@ def main():
     print(f"[INFO] Legacy DLL (change class): {outputs.dll_img}")
     print(f"[INFO] Legacy DLJ (interpretation): {outputs.dlj_img}")
 
-    # COG outputs use the documented naming convention so downstream tools and users
-    # can locate/identify products consistently.
+    # COG outputs use platform-prefixed naming so ArcGIS + downstream tooling can
+    # relate them back to the GA0 platform (e.g. sl8/sl9).
     vi_tag = 'vi-ndvi'
     target_epsg = int(sr.end_row['target_epsg'])
-    cog_dll_name = Path(f"lztmre_{tile}_d{eff_sd}{eff_ed}_{vi_tag}_dllmz_e{target_epsg}.tif")
-    cog_dlj_name = Path(f"lztmre_{tile}_d{eff_sd}{eff_ed}_{vi_tag}_dljmz_e{target_epsg}.tif")
+    platform = str(sr.end_row['platform']).lower().strip()  # e.g. 'sl8'
+    platform_prefix = f"{platform}olre"
+    cog_dll_name = Path(
+        f"{platform_prefix}_{tile}_d{eff_sd}{eff_ed}_{vi_tag}_dllmz_e{target_epsg}.tif"
+    )
+    cog_dlj_name = Path(
+        f"{platform_prefix}_{tile}_d{eff_sd}{eff_ed}_{vi_tag}_dljmz_e{target_epsg}.tif"
+    )
     print(f"[INFO] COG DLL target name: {cog_dll_name.name}")
     print(f"[INFO] COG DLJ target name: {cog_dlj_name.name}")
 
@@ -548,7 +554,7 @@ def main():
             paths.maskvec_work / 'vectors' / 'clear',
         ]
 
-        copy_run_to_home(
+        home_copy = copy_run_to_home(
             run_tag=run_tag,
             home_out_dir=Path(args.home_out_dir),
             ga0_start_raw_local=Path(ga0_start.local_raw_path),
@@ -562,6 +568,22 @@ def main():
             zip_after=bool(args.zip_home),
             dry_run=bool(args.dry_run),
         )
+
+        if bool(args.dlj_troubleshoot) and (not bool(args.dry_run)):
+            # Re-open the *home-copied* final COGs and dump stats so ArcGIS users
+            # can trust the artefacts they download.
+            try:
+                copied_cogs = [
+                    p for p in home_copy.copied
+                    if p.suffix.lower() in {'.tif', '.tiff'} and p.parent.name == 'cog_outputs'
+                ]
+                if copied_cogs:
+                    print("\n[DLJ-DBG] Home-copied COG outputs; dumping stats")
+                    for p in copied_cogs:
+                        _print_raster_stats(Path(p), label=f"HOME COG {p.name}")
+                    print("[DLJ-DBG] End home COG stats\n")
+            except Exception as e:
+                print(f"[WARN] Failed to read stats for home-copied COGs: {e}")
 
     print('[DONE] Optimised EDS processing complete.')
 
