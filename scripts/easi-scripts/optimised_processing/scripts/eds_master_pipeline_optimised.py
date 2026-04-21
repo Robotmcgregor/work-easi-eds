@@ -163,6 +163,33 @@ def _print_raster_stats(path: Path, label: str) -> None:
             print(f"[DLJ-DBG]   zeros={z}/{total}")
 
 
+def _dlj_has_any_valid_pixels(path: Path) -> bool:
+    """Return True if a raster has any non-nodata pixel in any band.
+
+    For these products, nodata is typically encoded as 0.
+    """
+    try:
+        import numpy as np  # type: ignore[import-not-found]
+        import rasterio  # type: ignore[import-not-found]
+    except Exception:
+        # If we can't import, don't hard-fail the pipeline.
+        return True
+
+    path = Path(path)
+    if not path.exists():
+        return False
+
+    with rasterio.open(path) as ds:
+        nodata = ds.nodata
+        if nodata is None:
+            nodata = 0
+        for b in range(1, ds.count + 1):
+            arr = ds.read(b)
+            if int(np.count_nonzero(arr != nodata)) > 0:
+                return True
+    return False
+
+
 @dataclass(frozen=True)
 class RunPaths:
     run_root: Path
@@ -570,18 +597,27 @@ def main():
         )
 
         if bool(args.dlj_troubleshoot) and (not bool(args.dry_run)):
-            # Re-open the *home-copied* final COGs and dump stats so ArcGIS users
+            # Re-open the *home-copied* DLJ products and dump stats so ArcGIS users
             # can trust the artefacts they download.
             try:
-                copied_cogs = [
+                copied_tifs = [
                     p for p in home_copy.copied
-                    if p.suffix.lower() in {'.tif', '.tiff'} and p.parent.name == 'cog_outputs'
+                    if p.suffix.lower() in {'.tif', '.tiff'}
+                    and p.parent.name in {'legacy_outputs', 'cog_outputs'}
+                    and 'dlj' in p.name.lower()
                 ]
-                if copied_cogs:
-                    print("\n[DLJ-DBG] Home-copied COG outputs; dumping stats")
-                    for p in copied_cogs:
-                        _print_raster_stats(Path(p), label=f"HOME COG {p.name}")
-                    print("[DLJ-DBG] End home COG stats\n")
+                if copied_tifs:
+                    print("\n[DLJ-DBG] Home-copied DLJ products; dumping stats + checks")
+                    any_fail = False
+                    for p in copied_tifs:
+                        _print_raster_stats(Path(p), label=f"HOME {p.parent.name} {p.name}")
+                        ok = _dlj_has_any_valid_pixels(Path(p))
+                        print(f"[DLJ-CHECK] {p.name}: {'PASS' if ok else 'FAIL (all nodata/zeros)'}")
+                        any_fail = any_fail or (not ok)
+                    print("[DLJ-DBG] End home DLJ checks\n")
+
+                    if any_fail:
+                        raise SystemExit("dlj failure")
             except Exception as e:
                 print(f"[WARN] Failed to read stats for home-copied COGs: {e}")
 
