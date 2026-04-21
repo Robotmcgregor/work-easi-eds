@@ -463,6 +463,15 @@ def main():
     print(f"[INFO] Legacy DLL (change class): {outputs.dll_img}")
     print(f"[INFO] Legacy DLJ (interpretation): {outputs.dlj_img}")
 
+    # COG outputs use the documented naming convention so downstream tools and users
+    # can locate/identify products consistently.
+    vi_tag = 'vi-ndvi'
+    target_epsg = int(sr.end_row['target_epsg'])
+    cog_dll_name = Path(f"lztmre_{tile}_d{eff_sd}{eff_ed}_{vi_tag}_dllmz_e{target_epsg}.tif")
+    cog_dlj_name = Path(f"lztmre_{tile}_d{eff_sd}{eff_ed}_{vi_tag}_dljmz_e{target_epsg}.tif")
+    print(f"[INFO] COG DLL target name: {cog_dll_name.name}")
+    print(f"[INFO] COG DLJ target name: {cog_dlj_name.name}")
+
     if bool(args.dlj_troubleshoot) or bool(args.stop_after_dlj):
         print("\n[DLJ-DBG] Legacy method outputs produced; dumping stats")
         _print_raster_stats(Path(outputs.dll_img), label="DLL")
@@ -475,14 +484,20 @@ def main():
     converted = convert_outputs_to_cog_and_upload(
         dll_src_img=outputs.dll_img,
         dlj_src_img=outputs.dlj_img,
-        dll_final_name=outputs.dll_img,
-        dlj_final_name=outputs.dlj_img,
+        dll_final_name=cog_dll_name,
+        dlj_final_name=cog_dlj_name,
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
         tile=tile,
         run_tag=run_tag,
         work_dir=paths.outputs_cog,
     )
+
+    if bool(args.dlj_troubleshoot):
+        print("\n[DLJ-DBG] Converted COG outputs; dumping stats")
+        _print_raster_stats(Path(converted.dllmz_cog_local), label="DLL COG")
+        _print_raster_stats(Path(converted.dljmz_cog_local), label="DLJ COG")
+        print("[DLJ-DBG] End COG stats\n")
 
     dljmz_cog_local = Path(converted.dljmz_cog_local)
 
