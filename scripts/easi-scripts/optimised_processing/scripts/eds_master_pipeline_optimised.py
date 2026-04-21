@@ -459,6 +459,10 @@ def main():
         diagnostics_dir=paths.diagnostics,
     )
 
+    print(f"[INFO] Legacy outputs dir: {paths.legacy_outputs}")
+    print(f"[INFO] Legacy DLL (change class): {outputs.dll_img}")
+    print(f"[INFO] Legacy DLJ (interpretation): {outputs.dlj_img}")
+
     if bool(args.dlj_troubleshoot) or bool(args.stop_after_dlj):
         print("\n[DLJ-DBG] Legacy method outputs produced; dumping stats")
         _print_raster_stats(Path(outputs.dll_img), label="DLL")
