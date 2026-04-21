@@ -98,13 +98,22 @@ def to_cog(src_path: str, dst_path: str, overwrite: bool = False) -> None:
 
     with rasterio.open(src_path) as src:
         profile = src.profile.copy()
+        dtype_str = str(profile.get('dtype', '')).lower()
+        is_float = dtype_str.startswith('float')
+        # NOTE: Some GIS tools (notably ArcGIS) can behave poorly with
+        # DEFLATE+predictor=2 on multi-band uint8 rasters. DLJ is 4-band uint8,
+        # so prefer predictor=1 there for maximum compatibility.
+        if is_float:
+            predictor = 3
+        else:
+            predictor = 1 if int(getattr(src, 'count', 1)) > 1 else 2
         profile.update(
             driver='GTiff',
             tiled=True,
             blockxsize=512,
             blockysize=512,
             compress='DEFLATE',
-            predictor=3 if str(profile.get('dtype','')).startswith('float') else 2,
+            predictor=predictor,
             BIGTIFF='IF_SAFER',
         )
 
