@@ -121,13 +121,18 @@ def sanitise_sr_for_log(arr: np.ndarray, nodata: float = -9999.0) -> np.ndarray:
     """
     Prepare SR stack for legacy log1p spectral index.
 
+    Key requirement: avoid NaNs propagating into global stats.
+
     - convert to float32
-    - replace nodata with NaN
-    - replace values <= -1 with NaN because log1p(x) is invalid for x <= -1
+    - coerce nodata/fill/invalid values to 0 (legacy uses 0 as null)
+    - coerce any negative values to 0 (reflectance should be >= 0)
     """
     out = arr.astype(np.float32, copy=True)
-    out[out == nodata] = np.nan
-    out[out <= -1] = np.nan
+    out[~np.isfinite(out)] = 0.0
+    # Common fill values
+    out[out == nodata] = 0.0
+    # Any negative reflectance is treated as nodata
+    out[out < 0] = 0.0
     return out
 
 # def write_envi(
@@ -158,6 +163,7 @@ def write_gtiff(
     georef,
     dtype=gdal.GDT_Byte,
     nodata=0,
+    band_names: List[str] | None = None,
 ):
     gt, proj = georef
 
@@ -188,6 +194,13 @@ def write_gtiff(
         band = ds.GetRasterBand(i)
         band.WriteArray(arr)
         band.SetNoDataValue(nodata)
+
+        if band_names is not None:
+            if len(band_names) != len(arrays):
+                raise ValueError(
+                    f"band_names length ({len(band_names)}) must match arrays length ({len(arrays)})"
+                )
+            band.SetDescription(str(band_names[i - 1]))
 
     ds.FlushCache()
     ds = None
@@ -868,12 +881,22 @@ def main(argv=None) -> int:
         dll_class[norm_start < 108] = NO_CLEARING
 
     # Interpretation (DLJ): stretch indices to uint8
-    spectralMean = float(np.mean(spectral_index[spectral_index != 0])) if np.any(spectral_index != 0) else 0.0
-    spectralStd  = float(np.std(spectral_index[spectral_index != 0])) if np.any(spectral_index != 0) else 1.0
-    sTestMean    = float(np.mean(s_test[s_test != 0])) if np.any(s_test != 0) else 0.0
-    sTestStd     = float(np.std(s_test[s_test != 0])) if np.any(s_test != 0) else 1.0
-    combMean     = float(np.mean(combined_index[combined_index != 0])) if np.any(combined_index != 0) else 0.0
-    combStd      = float(np.std(combined_index[combined_index != 0])) if np.any(combined_index != 0) else 1.0
+    # Robust global stats: ignore zeros and any non-finite values.
+    spec_vals = spectral_index[np.isfinite(spectral_index) & (spectral_index != 0)]
+    stest_vals = s_test[np.isfinite(s_test) & (s_test != 0)]
+    comb_vals = combined_index[np.isfinite(combined_index) & (combined_index != 0)]
+
+    spectralMean = float(spec_vals.mean()) if spec_vals.size else 0.0
+    spectralStd = float(spec_vals.std()) if spec_vals.size else 1.0
+    sTestMean = float(stest_vals.mean()) if stest_vals.size else 0.0
+    sTestStd = float(stest_vals.std()) if stest_vals.size else 1.0
+    combMean = float(comb_vals.mean()) if comb_vals.size else 0.0
+    combStd = float(comb_vals.std()) if comb_vals.size else 1.0
+
+    # Final safety: no NaNs in the arrays we stretch.
+    spectral_index = np.where(np.isfinite(spectral_index), spectral_index, 0).astype(np.float32)
+    s_test = np.where(np.isfinite(s_test), s_test, 0).astype(np.float32)
+    combined_index = np.where(np.isfinite(combined_index), combined_index, 0).astype(np.float32)
 
     spectral_stretch = stretch(spectral_index, spectralMean, spectralStd, 2, 1, 255, 0)
     trend_stretch    = stretch(s_test, sTestMean, sTestStd, 10, 1, 255, 0)
@@ -894,6 +917,7 @@ def main(argv=None) -> int:
         georef,
         dtype=gdal.GDT_Byte,
         nodata=0,
+        band_names=["dll_class"],
     )
 
     write_gtiff(
@@ -902,6 +926,7 @@ def main(argv=None) -> int:
         georef,
         dtype=gdal.GDT_Byte,
         nodata=0,
+        band_names=["spectralIndex", "ndviTrend", "combinedIndex", "clearingProb"],
     )
 
     # Lightweight JSON provenance log

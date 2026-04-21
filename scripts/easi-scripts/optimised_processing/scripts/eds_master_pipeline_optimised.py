@@ -71,6 +71,17 @@ def parse_args():
     ap.add_argument('--diagnostics', action='store_true')
     ap.add_argument('--verbose', action='store_true')
 
+    ap.add_argument(
+        '--dlj-troubleshoot',
+        action='store_true',
+        help='After DLJ is produced, print per-band pixel stats (and band descriptions).',
+    )
+    ap.add_argument(
+        '--stop-after-dlj',
+        action='store_true',
+        help='Exit immediately after DLJ is produced (for debugging/inspection).',
+    )
+
     ap.add_argument('--run-tag', default=None, help='Optional run tag for output folder (default: tile_d<start><end>)')
 
     ap.add_argument('--strong-threshold', type=int, default=60)
@@ -105,6 +116,51 @@ def parse_args():
     )
 
     return ap.parse_args()
+
+
+def _print_raster_stats(path: Path, label: str) -> None:
+    """Print lightweight stats for a raster (intended for DLJ/DLL debugging)."""
+    try:
+        import numpy as np  # type: ignore[import-not-found]
+        import rasterio  # type: ignore[import-not-found]
+    except Exception as e:
+        print(f"[DLJ-DBG] Cannot import rasterio/numpy for stats: {e}")
+        return
+
+    path = Path(path)
+    if not path.exists():
+        print(f"[DLJ-DBG] Missing raster for stats: {path}")
+        return
+
+    with rasterio.open(path) as ds:
+        print(f"[DLJ-DBG] {label}: {path}")
+        print(f"[DLJ-DBG]  driver={ds.driver} size={ds.width}x{ds.height} count={ds.count} dtype={ds.dtypes}")
+        print(f"[DLJ-DBG]  nodata={ds.nodata} crs={ds.crs}")
+        try:
+            print(f"[DLJ-DBG]  descriptions={ds.descriptions}")
+        except Exception:
+            pass
+
+        for b in range(1, ds.count + 1):
+            arr = ds.read(b)
+            nodata = ds.nodata
+            if nodata is None:
+                # For these outputs, 0 is the implicit nodata.
+                nodata = 0
+            mask = arr != nodata
+            total = arr.size
+            valid = int(mask.sum())
+            if valid == 0:
+                print(f"[DLJ-DBG]  band{b}: valid=0/{total} (all nodata={nodata})")
+                continue
+            v = arr[mask].astype(np.float64)
+            print(
+                f"[DLJ-DBG]  band{b}: valid={valid}/{total} "
+                f"min={v.min():.3f} max={v.max():.3f} mean={v.mean():.3f} std={v.std():.3f}"
+            )
+            # Quick signal: how much is just zeros?
+            z = int((arr == 0).sum())
+            print(f"[DLJ-DBG]   zeros={z}/{total}")
 
 
 @dataclass(frozen=True)
@@ -402,6 +458,15 @@ def main():
         output_dir=paths.legacy_outputs,
         diagnostics_dir=paths.diagnostics,
     )
+
+    if bool(args.dlj_troubleshoot) or bool(args.stop_after_dlj):
+        print("\n[DLJ-DBG] Legacy method outputs produced; dumping stats")
+        _print_raster_stats(Path(outputs.dll_img), label="DLL")
+        _print_raster_stats(Path(outputs.dlj_img), label="DLJ")
+        print("[DLJ-DBG] End stats\n")
+
+        if bool(args.stop_after_dlj):
+            raise SystemExit("dlj failure")
 
     converted = convert_outputs_to_cog_and_upload(
         dll_src_img=outputs.dll_img,
