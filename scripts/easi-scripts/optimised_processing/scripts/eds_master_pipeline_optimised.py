@@ -473,10 +473,12 @@ def main():
     print(f"[INFO] COG DLJ target name: {cog_dlj_name.name}")
 
     if bool(args.dlj_troubleshoot) or bool(args.stop_after_dlj):
-        print("\n[DLJ-DBG] Legacy method outputs produced; dumping stats")
-        _print_raster_stats(Path(outputs.dll_img), label="DLL")
-        _print_raster_stats(Path(outputs.dlj_img), label="DLJ")
-        print("[DLJ-DBG] End stats\n")
+        print("\n[DLJ-DBG] Legacy method outputs produced; dumping stats (legacy filenames)")
+        print(f"[DLJ-DBG]  legacy DLL name: {Path(outputs.dll_img).name}")
+        print(f"[DLJ-DBG]  legacy DLJ name: {Path(outputs.dlj_img).name}")
+        _print_raster_stats(Path(outputs.dll_img), label="DLL legacy")
+        _print_raster_stats(Path(outputs.dlj_img), label="DLJ legacy")
+        print("[DLJ-DBG] End legacy stats\n")
 
         if bool(args.stop_after_dlj):
             raise SystemExit("dlj failure")
@@ -494,9 +496,13 @@ def main():
     )
 
     if bool(args.dlj_troubleshoot):
-        print("\n[DLJ-DBG] Converted COG outputs; dumping stats")
-        _print_raster_stats(Path(converted.dllmz_cog_local), label="DLL COG")
-        _print_raster_stats(Path(converted.dljmz_cog_local), label="DLJ COG")
+        print("\n[DLJ-DBG] Converted COG outputs produced; dumping stats (final filenames)")
+        print(f"[DLJ-DBG]  expected COG DLL name: {cog_dll_name.name}")
+        print(f"[DLJ-DBG]  expected COG DLJ name: {cog_dlj_name.name}")
+        print(f"[DLJ-DBG]  actual   COG DLL name: {Path(converted.dllmz_cog_local).name}")
+        print(f"[DLJ-DBG]  actual   COG DLJ name: {Path(converted.dljmz_cog_local).name}")
+        _print_raster_stats(Path(converted.dllmz_cog_local), label="DLL COG final")
+        _print_raster_stats(Path(converted.dljmz_cog_local), label="DLJ COG final")
         print("[DLJ-DBG] End COG stats\n")
 
     dljmz_cog_local = Path(converted.dljmz_cog_local)
