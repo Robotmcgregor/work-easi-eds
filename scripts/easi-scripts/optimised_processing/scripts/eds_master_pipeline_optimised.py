@@ -492,15 +492,14 @@ def main():
 
     # COG outputs use platform-prefixed naming so ArcGIS + downstream tooling can
     # relate them back to the GA0 platform (e.g. sl8/sl9).
-    vi_tag = 'vi-ndvi'
     target_epsg = int(sr.end_row['target_epsg'])
     platform = str(sr.end_row['platform']).lower().strip()  # e.g. 'sl8'
     platform_prefix = f"{platform}olre"
     cog_dll_name = Path(
-        f"{platform_prefix}_{tile}_d{eff_sd}{eff_ed}_{vi_tag}_dllmz_e{target_epsg}.tif"
+        f"{platform_prefix}_{tile}_d{eff_sd}{eff_ed}_dll_e{target_epsg}.tif"
     )
     cog_dlj_name = Path(
-        f"{platform_prefix}_{tile}_d{eff_sd}{eff_ed}_{vi_tag}_dljmz_e{target_epsg}.tif"
+        f"{platform_prefix}_{tile}_d{eff_sd}{eff_ed}_dlj_e{target_epsg}.tif"
     )
     print(f"[INFO] COG DLL target name: {cog_dll_name.name}")
     print(f"[INFO] COG DLJ target name: {cog_dlj_name.name}")
