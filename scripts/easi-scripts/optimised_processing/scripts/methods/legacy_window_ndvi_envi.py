@@ -117,6 +117,89 @@ def load_raster(path: str) -> Tuple[np.ndarray, Tuple]:
     ds = None
     return arr, georef
 
+
+def _finite_percentiles(values: np.ndarray, percentiles: list[float]) -> list[float]:
+    v = values.astype(np.float64, copy=False)
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return [float("nan") for _ in percentiles]
+    return [float(x) for x in np.percentile(v, percentiles)]
+
+
+def _print_stack_summary(label: str, arr: np.ndarray, *, band_indices_0based: list[int] | None = None) -> None:
+    """Lightweight numeric summary to help diagnose scaling/masking."""
+    if arr.ndim == 2:
+        arr = arr[np.newaxis, :, :]
+
+    print(f"[VALIDATION] {label}: dtype={arr.dtype} shape={tuple(arr.shape)}")
+    if band_indices_0based is None:
+        band_indices_0based = list(range(arr.shape[0]))
+
+    for bi in band_indices_0based:
+        if bi < 0 or bi >= arr.shape[0]:
+            print(f"[VALIDATION] {label}: band[{bi+1}] (1-based) not present")
+            continue
+        b = arr[bi]
+        # Common for these products: 0 used as nodata/fill. Show both all-values
+        # and nonzero-only summaries.
+        p_all = _finite_percentiles(b, [0, 1, 5, 50, 95, 99, 100])
+        b_nz = b[(b != 0) & np.isfinite(b)]
+        p_nz = _finite_percentiles(b_nz, [0, 1, 5, 50, 95, 99, 100])
+        print(
+            f"[VALIDATION] {label}: band[{bi+1}] p(min,p01,p05,p50,p95,p99,max)="
+            f"({p_all[0]:.6g},{p_all[1]:.6g},{p_all[2]:.6g},{p_all[3]:.6g},{p_all[4]:.6g},{p_all[5]:.6g},{p_all[6]:.6g})"
+        )
+        print(
+            f"[VALIDATION] {label}: band[{bi+1}] nonzero p(min,p01,p05,p50,p95,p99,max)="
+            f"({p_nz[0]:.6g},{p_nz[1]:.6g},{p_nz[2]:.6g},{p_nz[3]:.6g},{p_nz[4]:.6g},{p_nz[5]:.6g},{p_nz[6]:.6g})"
+        )
+
+
+def _print_metric_summary(label: str, arr: np.ndarray, *, treat_zero_as_nodata: bool = True) -> None:
+    a = arr.astype(np.float64, copy=False)
+    finite = np.isfinite(a)
+    if treat_zero_as_nodata:
+        finite &= (a != 0)
+
+    total = a.size
+    valid = int(np.count_nonzero(finite))
+    pct_valid = (valid / total * 100.0) if total else 0.0
+    print(f"[VALIDATION] {label}: valid={valid}/{total} ({pct_valid:.3f}%)")
+    if valid == 0:
+        return
+    v = a[finite]
+    p = np.percentile(v, [0, 1, 5, 50, 95, 99, 100])
+    print(
+        f"[VALIDATION] {label}: p(min,p01,p05,p50,p95,p99,max)="
+        f"({p[0]:.6g},{p[1]:.6g},{p[2]:.6g},{p[3]:.6g},{p[4]:.6g},{p[5]:.6g},{p[6]:.6g})"
+    )
+
+
+def _print_gdal_info(label: str, path: str) -> None:
+    ds = gdal.Open(path, gdal.GA_ReadOnly)
+    if ds is None:
+        print(f"[VALIDATION] {label}: cannot open {path}")
+        return
+    drv = ds.GetDriver().ShortName if ds.GetDriver() else "(unknown)"
+    proj = ds.GetProjection() or ""
+    gt = ds.GetGeoTransform(can_return_null=True)
+    print(f"[VALIDATION] {label}: path={path}")
+    print(f"[VALIDATION] {label}: driver={drv} size=({ds.RasterXSize},{ds.RasterYSize}) bands={ds.RasterCount}")
+    if gt:
+        print(f"[VALIDATION] {label}: geotransform={gt}")
+    if proj:
+        proj_snip = proj.replace("\n", " ")
+        if len(proj_snip) > 160:
+            proj_snip = proj_snip[:160] + "..."
+        print(f"[VALIDATION] {label}: projection={proj_snip}")
+    # Print datatype + nodata for the first few bands
+    for i in range(1, min(ds.RasterCount, 6) + 1):
+        b = ds.GetRasterBand(i)
+        dt_name = gdal.GetDataTypeName(b.DataType)
+        nd = b.GetNoDataValue()
+        print(f"[VALIDATION] {label}: band[{i}] dtype={dt_name} nodata={nd}")
+    ds = None
+
 def sanitise_sr_for_log(arr: np.ndarray, nodata: float = -9999.0) -> np.ndarray:
     """
     Prepare SR stack for legacy log1p spectral index.
@@ -412,6 +495,22 @@ def main(argv=None) -> int:
     ref_start, georef = load_raster(start_db8)
     ref_end, _ = load_raster(end_db8)
 
+    if args.verbose:
+        _print_gdal_info("db8_start", start_db8)
+        _print_gdal_info("db8_end", end_db8)
+        # Legacy spectral index uses bands 2,3,5,6 (1-based). Our arrays are 0-based.
+        _print_stack_summary("db8_start_raw", ref_start, band_indices_0based=[1, 2, 4, 5])
+        _print_stack_summary("db8_end_raw", ref_end, band_indices_0based=[1, 2, 4, 5])
+
+        # Heuristic hint for SR scaling: reflectance should typically be ~0..1 (or ~0..2 after offset)
+        # whereas DN-scaled SR is often in the thousands.
+        b5 = ref_start[4] if (ref_start.ndim == 3 and ref_start.shape[0] > 4) else None
+        if b5 is not None:
+            b5_nz = b5[(b5 != 0) & np.isfinite(b5)]
+            if b5_nz.size:
+                med = float(np.median(b5_nz))
+                print(f"[VALIDATION] sr_scale_hint: start_db8 band5 median_nonzero={med:.6g} (expect ~0..1 if reflectance-scaled)")
+
     # Sanitise SR stacks so nodata/fill values do not break log1p()
     ref_start = sanitise_sr_for_log(ref_start, nodata=-9999.0)
     ref_end = sanitise_sr_for_log(ref_end, nodata=-9999.0)
@@ -419,12 +518,19 @@ def main(argv=None) -> int:
     # Load NDVI dc4 images and crop to common shape
     raw_ndvi = []
     dates = []
+    paths = []
     for p in dc4_files:
         arr, _ = load_raster(p)
         if arr.shape[0] != 1:
             raise SystemExit(f"dc4 (NDVI) must be single band: {p}")
         raw_ndvi.append(arr[0])
         dates.append(parse_date(p))
+        paths.append(p)
+
+    if args.verbose and raw_ndvi:
+        # DC4 NDVI is expected in [0..200] (scaled from [-1..1]) with 0 as nodata.
+        _print_gdal_info("dc4_ndvi_sample", dc4_files[0])
+        _print_stack_summary("dc4_ndvi_sample", raw_ndvi[0])
 
     # Determine common shape
     ys = []
@@ -452,12 +558,13 @@ def main(argv=None) -> int:
     # Build seasonal baseline: select one NDVI per year within window, up to lookback years
     baseline_ndvi = []
     baseline_dates = []
+    baseline_paths = []
     start_year = int(sd[:4])
 
     for year_offset in range(1, args.lookback + 1):
         baseline_year = start_year - year_offset
         candidates = [
-            (p, d) for p, d in zip(raw_ndvi, dates)
+            (p, d, fp) for p, d, fp in zip(raw_ndvi, dates, paths)
             if int(d[:4]) == baseline_year
             and in_window(d, ws, we)
             and d <= sd
@@ -466,45 +573,55 @@ def main(argv=None) -> int:
             chosen = min(candidates, key=lambda x: abs(int(x[1][4:]) - int(sd[4:])))
             baseline_ndvi.append(chosen[0])
             baseline_dates.append(chosen[1])
+            baseline_paths.append(chosen[2])
 
     # Fallback if baseline is too small
     if len(baseline_ndvi) < 2:
         fallback = [
-            (p, d) for p, d in zip(raw_ndvi, dates)
+            (p, d, fp) for p, d, fp in zip(raw_ndvi, dates, paths)
             if in_window(d, ws, we) and d <= sd
         ]
         if len(fallback) >= 2:
-            baseline_ndvi = [p for p, d in sorted(fallback, key=lambda x: x[1])]
-            baseline_dates = [d for p, d in sorted(fallback, key=lambda x: x[1])]
+            baseline_ndvi = [p for p, d, fp in sorted(fallback, key=lambda x: x[1])]
+            baseline_dates = [d for p, d, fp in sorted(fallback, key=lambda x: x[1])]
+            baseline_paths = [fp for p, d, fp in sorted(fallback, key=lambda x: x[1])]
         else:
             raise SystemExit("Insufficient baseline NDVI images")
 
     if args.verbose:
-        print(f"[Baseline NDVI] Found {len(baseline_ndvi)} images: {baseline_dates}")
+        print(f"[VALIDATION] baseline_ndvi_count: {len(baseline_ndvi)}")
+        print(f"[VALIDATION] baseline_dates: {baseline_dates}")
+        print(f"[VALIDATION] baseline_paths: {baseline_paths}")
 
     # Select start/end NDVI images
     start_candidates = [
-        (p, d) for p, d in zip(raw_ndvi, dates)
+        (p, d, fp) for p, d, fp in zip(raw_ndvi, dates, paths)
         if in_window(d, ws, we) and d <= sd and d not in baseline_dates
     ]
     end_candidates = [
-        (p, d) for p, d in zip(raw_ndvi, dates)
+        (p, d, fp) for p, d, fp in zip(raw_ndvi, dates, paths)
         if in_window(d, ws, we) and d >= ed and d not in baseline_dates
     ]
 
     if not start_candidates:
-        start_ndvi, start_ndvi_date = baseline_ndvi[-1], baseline_dates[-1]
+        start_ndvi, start_ndvi_date, start_ndvi_path = baseline_ndvi[-1], baseline_dates[-1], baseline_paths[-1]
     else:
-        start_ndvi, start_ndvi_date = min(start_candidates, key=lambda x: abs(int(x[1]) - int(sd)))
+        start_ndvi, start_ndvi_date, start_ndvi_path = min(start_candidates, key=lambda x: abs(int(x[1]) - int(sd)))
 
     if not end_candidates:
-        end_ndvi, end_ndvi_date = baseline_ndvi[-1], baseline_dates[-1]
+        end_ndvi, end_ndvi_date, end_ndvi_path = baseline_ndvi[-1], baseline_dates[-1], baseline_paths[-1]
     else:
-        end_ndvi, end_ndvi_date = min(end_candidates, key=lambda x: abs(int(x[1]) - int(ed)))
+        end_ndvi, end_ndvi_date, end_ndvi_path = min(end_candidates, key=lambda x: abs(int(x[1]) - int(ed)))
 
     if args.verbose:
-        print(f"[Start NDVI] {start_ndvi_date}")
-        print(f"[End NDVI]   {end_ndvi_date}")
+        print(f"[VALIDATION] start_ndvi_date: {start_ndvi_date}")
+        print(f"[VALIDATION] end_ndvi_date:   {end_ndvi_date}")
+        print(f"[VALIDATION] start_ndvi_path: {start_ndvi_path}")
+        print(f"[VALIDATION] end_ndvi_path:   {end_ndvi_path}")
+
+        # Summarise chosen start/end NDVI values to diagnose masking/range.
+        _print_stack_summary("ndvi_start_raw", start_ndvi)
+        _print_stack_summary("ndvi_end_raw", end_ndvi)
 
     # Normalize NDVI
     norm_baseline = [normalise_ndvi(a) for a in baseline_ndvi]
@@ -563,6 +680,20 @@ def main(argv=None) -> int:
         - 5.2609715 * t_test
         - 4.3794265 * s_test
     ).astype(np.float32)
+
+    if args.verbose:
+        # Summarise intermediate arrays to diagnose scaling/variance.
+        _print_metric_summary("base_std", base_std, treat_zero_as_nodata=False)
+        _print_metric_summary("base_stderr", base_stderr, treat_zero_as_nodata=False)
+        print(
+            f"[VALIDATION] valid_std_pct: {float(np.mean(base_std >= 0.2) * 100):.3f}% | "
+            f"valid_stderr_pct: {float(np.mean(base_stderr >= 0.2) * 100):.3f}%"
+        )
+        _print_metric_summary("spectral_index", spectral_index, treat_zero_as_nodata=True)
+        _print_metric_summary("ndvi_trend(norm_end-norm_start)", ndvi_trend, treat_zero_as_nodata=False)
+        _print_metric_summary("t_test", t_test, treat_zero_as_nodata=True)
+        _print_metric_summary("s_test", s_test, treat_zero_as_nodata=True)
+        _print_metric_summary("combined_index", combined_index, treat_zero_as_nodata=True)
 
     # # --------------------------------------------------
     # # DIAGNOSTIC OUTPUT: raw combined index (UNSTRETCHED)
@@ -837,6 +968,12 @@ def main(argv=None) -> int:
     # NDVI-only diagnostic metric (standardised change)
     ndviDiffStdErr = -(ndvi_trend) / np.maximum(base_stderr, 0.2)
     dll_class[(t_test > -1.70) & (ndviDiffStdErr > 6.0)] = 3
+
+    if args.verbose:
+        _print_metric_summary("ndviDiffStdErr", ndviDiffStdErr, treat_zero_as_nodata=False)
+        uniq, cnt = np.unique(dll_class, return_counts=True)
+        parts = [f"{int(u)}:{int(c)}" for u, c in zip(uniq, cnt)]
+        print(f"[VALIDATION] dll_class_counts: {' '.join(parts)}")
 
     # ------------------ DIAGNOSTICS ------------------
     if args.diagnostics:
