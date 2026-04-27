@@ -937,7 +937,7 @@ def main(argv=None) -> int:
         georef,
         dtype=gdal.GDT_Float32,
         nodata=0,
-    )
+    ) 
 
     print("file sent to ", combined_img)
 
