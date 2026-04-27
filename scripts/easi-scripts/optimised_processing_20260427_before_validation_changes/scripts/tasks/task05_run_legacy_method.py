@@ -86,7 +86,6 @@ def run_legacy_ndvi_window(
         "--window-end", window_end_mmdd,
         "--lookback", str(int(lookback)),
         "--vi-tag", vi_tag,
-        "--output-dir", str(output_dir),
         "--diagnostics-dir", str(diagnostics_dir),
     ]
 

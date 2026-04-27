@@ -42,7 +42,6 @@ import argparse
 import glob
 import math
 import os
-import posixpath
 from pathlib import Path
 from typing import List, Tuple
 
@@ -200,164 +199,6 @@ def _print_gdal_info(label: str, path: str) -> None:
         nd = b.GetNoDataValue()
         print(f"[VALIDATION] {label}: band[{i}] dtype={dt_name} nodata={nd}")
     ds = None
-
-
-def _is_vsi_path(path: str) -> bool:
-    return path.startswith("/vsi")
-
-
-def _normalise_output_base(path: str) -> str:
-    """Normalise output base path.
-
-    Supports:
-      - local paths
-      - GDAL VSI paths such as /vsis3/bucket/prefix
-      - convenience s3://bucket/prefix -> /vsis3/bucket/prefix
-    """
-    if path.startswith("s3://"):
-        return "/vsis3/" + path[len("s3://") :].lstrip("/")
-    if path.startswith("/vsi"):
-        return path
-    return os.path.expanduser(path)
-
-
-def _join_out(base: str, name: str) -> str:
-    base = base.rstrip("/\\")
-    if _is_vsi_path(base):
-        return posixpath.join(base, name)
-    return str(Path(base) / name)
-
-
-def _ensure_local_dir(path: str) -> None:
-    if _is_vsi_path(path):
-        return
-    Path(path).mkdir(parents=True, exist_ok=True)
-
-
-def _write_bytes_anywhere(path: str, data: bytes) -> None:
-    """Write bytes to local filesystem or GDAL VSI path."""
-    if _is_vsi_path(path):
-        f = gdal.VSIFOpenL(path, "wb")
-        if not f:
-            raise IOError(f"Failed to open for write: {path}")
-        try:
-            gdal.VSIFWriteL(data, 1, len(data), f)
-        finally:
-            gdal.VSIFCloseL(f)
-        return
-
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "wb") as fp:
-        fp.write(data)
-
-
-def _write_text_anywhere(path: str, text: str, *, encoding: str = "utf-8") -> None:
-    _write_bytes_anywhere(path, text.encode(encoding))
-
-
-def _dataset_bounds(gt: Tuple[float, float, float, float, float, float], xsize: int, ysize: int) -> Tuple[float, float, float, float]:
-    """Return (xmin, ymin, xmax, ymax) bounds for a north-up geotransform."""
-    xmin = gt[0]
-    xres = gt[1]
-    ymax = gt[3]
-    yres = gt[5]
-    xmax = xmin + xres * xsize
-    ymin = ymax + yres * ysize
-    return (xmin, ymin, xmax, ymax)
-
-
-def _georef_nearly_equal(a: Tuple | None, b: Tuple | None, *, tol: float = 1e-6) -> bool:
-    if a is None or b is None:
-        return False
-    if len(a) != len(b):
-        return False
-    for x, y in zip(a, b):
-        try:
-            if abs(float(x) - float(y)) > tol:
-                return False
-        except Exception:
-            if x != y:
-                return False
-    return True
-
-
-def load_single_band_raster(
-    path: str,
-    *,
-    align_to_path: str | None = None,
-    resample: str = "bilinear",
-    src_nodata: float | None = -9999.0,
-    dst_nodata: float | None = -9999.0,
-) -> Tuple[np.ndarray, bool]:
-    """Load a single-band raster; optionally warp it onto the grid of align_to_path."""
-    ds = gdal.Open(path, gdal.GA_ReadOnly)
-    if ds is None:
-        raise IOError(f"Cannot open {path}")
-    if ds.RasterCount != 1:
-        raise ValueError(f"Expected 1 band in {path}; got {ds.RasterCount}")
-
-    if not align_to_path:
-        arr = ds.GetRasterBand(1).ReadAsArray()
-        ds = None
-        return arr, False
-
-    ref = gdal.Open(align_to_path, gdal.GA_ReadOnly)
-    if ref is None:
-        ds = None
-        raise IOError(f"Cannot open reference dataset {align_to_path}")
-
-    src_gt = ds.GetGeoTransform(can_return_null=True)
-    src_proj = ds.GetProjection() or ""
-    ref_gt = ref.GetGeoTransform(can_return_null=True)
-    ref_proj = ref.GetProjection() or ""
-
-    # If already aligned (same proj + very similar geotransform + same shape), skip warp.
-    if (
-        (src_proj == ref_proj)
-        and _georef_nearly_equal(src_gt, ref_gt, tol=1e-6)
-        and ds.RasterXSize == ref.RasterXSize
-        and ds.RasterYSize == ref.RasterYSize
-    ):
-        arr = ds.GetRasterBand(1).ReadAsArray()
-        ds = None
-        ref = None
-        return arr, False
-
-    alg_map = {
-        "nearest": gdal.GRA_NearestNeighbour,
-        "bilinear": gdal.GRA_Bilinear,
-        "cubic": gdal.GRA_Cubic,
-    }
-    if resample not in alg_map:
-        raise ValueError(f"Unsupported resample='{resample}' (choose from {sorted(alg_map.keys())})")
-
-    if not ref_gt:
-        ds = None
-        ref = None
-        raise ValueError(f"Reference dataset {align_to_path} has no geotransform")
-
-    bounds = _dataset_bounds(ref_gt, ref.RasterXSize, ref.RasterYSize)
-
-    warped = gdal.Warp(
-        "",
-        ds,
-        format="MEM",
-        dstSRS=ref_proj,
-        outputBounds=bounds,
-        width=ref.RasterXSize,
-        height=ref.RasterYSize,
-        resampleAlg=alg_map[resample],
-        srcNodata=src_nodata,
-        dstNodata=dst_nodata,
-    )
-    ds = None
-    ref = None
-    if warped is None:
-        raise RuntimeError(f"gdal.Warp failed for {path} -> {align_to_path}")
-
-    arr = warped.GetRasterBand(1).ReadAsArray()
-    warped = None
-    return arr, True
 
 def sanitise_sr_for_log(arr: np.ndarray, nodata: float = -9999.0) -> np.ndarray:
     """
@@ -518,11 +359,11 @@ def stretch(
     stretched[img == ignoreVal] = 0
     return stretched.astype(np.uint8)
 
-def write_diag_stats_csv(values: np.ndarray, out_csv: str | Path, *, thresholds=(2.5, 6.0, 10.0)) -> None:
+def write_diag_stats_csv(values: np.ndarray, out_csv: Path, *, thresholds=(2.5, 6.0, 10.0)) -> None:
     v = values.astype(np.float64)
     v = v[np.isfinite(v)]
     if v.size == 0:
-        _write_text_anywhere(str(out_csv), "metric,count\nndviDiffStdErr,0\n", encoding="utf-8")
+        out_csv.write_text("metric,count\nndviDiffStdErr,0\n", encoding="utf-8")
         return
 
     pct = np.percentile(v, [0, 1, 5, 10, 25, 50, 75, 90, 95, 99, 100])
@@ -541,27 +382,27 @@ def write_diag_stats_csv(values: np.ndarray, out_csv: str | Path, *, thresholds=
     for t in thresholds:
         lines.append(f"{t},{(np.mean(v >= t) * 100):.4f}")
 
-    _write_text_anywhere(str(out_csv), "\n".join(lines) + "\n", encoding="utf-8")
+    out_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_diag_bins_csv(values: np.ndarray, out_csv: str | Path, *, bins=256, clip_abs=200.0) -> None:
+def write_diag_bins_csv(values: np.ndarray, out_csv: Path, *, bins=256, clip_abs=200.0) -> None:
     v = values.astype(np.float64)
     v = v[np.isfinite(v)]
     if v.size == 0:
-        _write_text_anywhere(str(out_csv), "bin_left,bin_right,count\n", encoding="utf-8")
+        out_csv.write_text("bin_left,bin_right,count\n", encoding="utf-8")
         return
 
     v = np.clip(v, -clip_abs, clip_abs)
     counts, edges = np.histogram(v, bins=bins)
-    lines = ["bin_left,bin_right,count"]
-    for i in range(len(counts)):
-        lines.append(f"{edges[i]:.6f},{edges[i+1]:.6f},{int(counts[i])}")
-    _write_text_anywhere(str(out_csv), "\n".join(lines) + "\n", encoding="utf-8")
+    with out_csv.open("w", encoding="utf-8") as f:
+        f.write("bin_left,bin_right,count\n")
+        for i in range(len(counts)):
+            f.write(f"{edges[i]:.6f},{edges[i+1]:.6f},{int(counts[i])}\n")
 
-def write_stats_csv(values: np.ndarray, out_csv: str | Path) -> None:
+def write_stats_csv(values: np.ndarray, out_csv: Path) -> None:
     v = values[np.isfinite(values)]
     if v.size == 0:
-        _write_text_anywhere(str(out_csv), "count,mean,std,min,p01,p05,p10,p25,p50,p75,p90,p95,p99,max\n0\n")
+        out_csv.write_text("count,mean,std,min,p01,p05,p10,p25,p50,p75,p90,p95,p99,max\n0\n")
         return
 
     pct = np.percentile(v, [1,5,10,25,50,75,90,95,99])
@@ -577,22 +418,22 @@ def write_stats_csv(values: np.ndarray, out_csv: str | Path) -> None:
         f"6.0,{(np.mean(v >= 6.0) * 100):.4f}",
         f"10.0,{(np.mean(v >= 10.0) * 100):.4f}",
     ]
-    _write_text_anywhere(str(out_csv), "\n".join(lines) + "\n")
+    out_csv.write_text("\n".join(lines) + "\n")
 
 
-def write_bins_csv(values: np.ndarray, out_csv: str | Path, bins=256, clip=200.0) -> None:
+def write_bins_csv(values: np.ndarray, out_csv: Path, bins=256, clip=200.0) -> None:
     v = values[np.isfinite(values)]
     if v.size == 0:
-        _write_text_anywhere(str(out_csv), "bin_left,bin_right,count\n")
+        out_csv.write_text("bin_left,bin_right,count\n")
         return
 
     v = np.clip(v, -clip, clip)
     counts, edges = np.histogram(v, bins=bins)
 
-    lines = ["bin_left,bin_right,count"]
-    for i in range(len(counts)):
-        lines.append(f"{edges[i]:.6f},{edges[i+1]:.6f},{int(counts[i])}")
-    _write_text_anywhere(str(out_csv), "\n".join(lines) + "\n")
+    with out_csv.open("w") as f:
+        f.write("bin_left,bin_right,count\n")
+        for i in range(len(counts)):
+            f.write(f"{edges[i]:.6f},{edges[i+1]:.6f},{counts[i]}\n")
 
 
 def main(argv=None) -> int:
@@ -616,21 +457,6 @@ def main(argv=None) -> int:
     ap.add_argument("--diag-bins", type=int, default=256, help="Histogram bin count (default 256)")
     ap.add_argument("--diag-clip", type=float, default=200.0, help="Clip abs(values) for histograms (default 200)")
     ap.add_argument("--diagnostics-dir", help="Directory for diagnostic rasters, CSVs, and plots")
-    ap.add_argument(
-        "--output-dir",
-        help="Directory/prefix for outputs. Supports local paths and S3 via s3://bucket/prefix or /vsis3/bucket/prefix",
-    )
-    ap.add_argument(
-        "--no-align-dc4-to-db8",
-        action="store_true",
-        help="Disable warping dc4 NDVI rasters onto the start-db8 grid (recommended to keep aligned)",
-    )
-    ap.add_argument(
-        "--dc4-resample",
-        default="bilinear",
-        choices=["nearest", "bilinear", "cubic"],
-        help="Resampling used when aligning dc4 to db8 grid (default: bilinear)",
-    )
 
     args = ap.parse_args(argv)
 
@@ -639,14 +465,10 @@ def main(argv=None) -> int:
     ed = args.end_date
     ws = args.window_start or sd[4:]
     we = args.window_end or ed[4:]
-    output_base = _normalise_output_base(args.output_dir or os.getcwd())
-    diagnostics_base = _normalise_output_base(args.diagnostics_dir or _join_out(output_base, "diagnostics"))
-    _ensure_local_dir(output_base)
-    _ensure_local_dir(diagnostics_base)
-
-    if args.verbose:
-        print(f"[VALIDATION] output_dir: {output_base}")
-        print(f"[VALIDATION] diagnostics_dir: {diagnostics_base}")
+    output_dir = Path.cwd()
+    diagnostics_dir = Path(args.diagnostics_dir) if args.diagnostics_dir else (output_dir / "diagnostics")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve SR db8 stacks
     if args.start_db8 and args.end_db8:
@@ -693,36 +515,17 @@ def main(argv=None) -> int:
     ref_start = sanitise_sr_for_log(ref_start, nodata=-9999.0)
     ref_end = sanitise_sr_for_log(ref_end, nodata=-9999.0)
 
-    # Load NDVI dc4 images (optionally align to start_db8 grid)
+    # Load NDVI dc4 images and crop to common shape
     raw_ndvi = []
     dates = []
     paths = []
-    warped_count = 0
     for p in dc4_files:
-        if args.no_align_dc4_to_db8:
-            arr, _ = load_raster(p)
-            if arr.shape[0] != 1:
-                raise SystemExit(f"dc4 (NDVI) must be single band: {p}")
-            raw_ndvi.append(arr[0])
-        else:
-            # Warp onto db8 grid to avoid misregistration between GA0 (SR) and GA1 (NDVI).
-            nd, did_warp = load_single_band_raster(
-                p,
-                align_to_path=start_db8,
-                resample=args.dc4_resample,
-                src_nodata=-9999.0,
-                dst_nodata=-9999.0,
-            )
-            raw_ndvi.append(nd)
-            if did_warp:
-                warped_count += 1
+        arr, _ = load_raster(p)
+        if arr.shape[0] != 1:
+            raise SystemExit(f"dc4 (NDVI) must be single band: {p}")
+        raw_ndvi.append(arr[0])
         dates.append(parse_date(p))
         paths.append(p)
-
-    if args.verbose and not args.no_align_dc4_to_db8:
-        print(f"[VALIDATION] dc4_alignment: aligned_to_db8=true resample={args.dc4_resample} warped_files={warped_count}/{len(dc4_files)}")
-    elif args.verbose:
-        print("[VALIDATION] dc4_alignment: aligned_to_db8=false")
 
     if args.verbose and raw_ndvi:
         # DC4 NDVI is expected in [0..200] (scaled from [-1..1]) with 0 as nodata.
@@ -1120,13 +923,13 @@ def main(argv=None) -> int:
     platform = m.group(1)   # e.g. sl8
     epsg = m.group(3)       # e.g. 32756
 
-    dll_path = _join_out(output_base, f"{platform}olre_{tile}_d{sd}{ed}_dll_e{epsg}.tif")
-    dlj_path = _join_out(output_base, f"{platform}olre_{tile}_d{sd}{ed}_dlj_e{epsg}.tif")
+    dll_path = output_dir / f"{platform}olre_{tile}_d{sd}{ed}_dll_e{epsg}.tif"
+    dlj_path = output_dir / f"{platform}olre_{tile}_d{sd}{ed}_dlj_e{epsg}.tif"
 
     # --------------------------------------------------
     # DIAGNOSTIC OUTPUT: raw combined index (UNSTRETCHED)
     # --------------------------------------------------
-    combined_img = _join_out(diagnostics_base, f"{platform}olre_{tile}_d{sd}{ed}_combined_raw_e{epsg}.tif")
+    combined_img = diagnostics_dir / f"{platform}olre_{tile}_d{sd}{ed}_combined_raw_e{epsg}.tif"
 
     write_gtiff(
         str(combined_img),
@@ -1184,8 +987,8 @@ def main(argv=None) -> int:
 
         diag_name = f"{platform}olre_{tile}_d{sd}{ed}_{args.vi_tag}_e{epsg}"
 
-        stats_csv = _join_out(diagnostics_base, f"{diag_name}_ndviDiffStdErr_stats.csv")
-        bins_csv  = _join_out(diagnostics_base, f"{diag_name}_ndviDiffStdErr_bins.csv")
+        stats_csv = diagnostics_dir / f"{diag_name}_ndviDiffStdErr_stats.csv"
+        bins_csv  = diagnostics_dir / f"{diag_name}_ndviDiffStdErr_bins.csv"
 
         write_diag_stats_csv(vals, stats_csv)
         write_diag_bins_csv(vals, bins_csv, bins=args.diag_bins, clip_abs=args.diag_clip)
@@ -1202,9 +1005,7 @@ def main(argv=None) -> int:
             plt.axvline(2.5, linestyle="--")
             plt.axvline(-2.5, linestyle="--")
             plt.title("ndviDiffStdErr histogram (clipped)")
-            png_path = _join_out(diagnostics_base, f"{diag_name}_ndviDiffStdErr.png")
-            if _is_vsi_path(str(png_path)):
-                raise RuntimeError("Skipping PNG output to VSI path")
+            png_path = diagnostics_dir / f"{diag_name}_ndviDiffStdErr.png"
             plt.savefig(png_path, dpi=150, bbox_inches="tight")
             plt.close()
             print(f"[DIAG] Histogram PNG: {png_path}")
@@ -1284,8 +1085,9 @@ def main(argv=None) -> int:
                 "dlj": str(dlj_path),
             },
         }
-        log_path = _join_out(output_base, f"{platform}olre_{tile}_d{sd}{ed}_dll_log_e{epsg}.json")
-        _write_text_anywhere(str(log_path), json.dumps(log, indent=2) + "\n", encoding="utf-8")
+        log_path = output_dir / f"{platform}olre_{tile}_d{sd}{ed}_dll_log_e{epsg}.json"
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(log, f, indent=2)
         if args.verbose:
             print(f"[Output] LOG: {log_path}")
     except Exception as e:

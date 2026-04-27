@@ -19,8 +19,8 @@ from tasks.task08_masks_and_vectors import make_masks_and_vectors
 
 """Optimised EDS processing pipeline (NDVI seasonal-window; datacube-native).
 
-This pipeline keeps the existing scientific workflow but writes all local artifacts
-and final S3 outputs into a single run-scoped layout (see --run-tag/--run-id).
+This pipeline keeps the existing scientific workflow but writes all local and S3
+artifacts into a single run-scoped layout.
 
 Local run layout:
   <work-dir>/<tile>/<run-tag>/
@@ -82,17 +82,7 @@ def parse_args():
         help='Exit immediately after DLJ is produced (for debugging/inspection).',
     )
 
-    run_group = ap.add_mutually_exclusive_group()
-    run_group.add_argument(
-        '--run-tag',
-        default=None,
-        help='Optional run tag for output folder (default: tile_d<start><end>)',
-    )
-    run_group.add_argument(
-        '--run-id',
-        default=None,
-        help='Alias for --run-tag (e.g. run1, run2). Useful for separating repeated runs.',
-    )
+    ap.add_argument('--run-tag', default=None, help='Optional run tag for output folder (default: tile_d<start><end>)')
 
     ap.add_argument('--strong-threshold', type=int, default=60)
     ap.add_argument('--clear-threshold', type=int, default=80)
@@ -334,7 +324,7 @@ def main():
 
     sd = _norm_yyyymmdd(args.start_date)
     ed = _norm_yyyymmdd(args.end_date)
-    run_tag = args.run_tag or args.run_id or f'{tile}_d{sd}{ed}'
+    run_tag = args.run_tag or f'{tile}_d{sd}{ed}'
 
     paths = RunPaths.from_args(args, tile=tile, run_tag=run_tag)
     paths.ensure_directories(include_sr_raw_cog=bool(args.export_sr_raw_cog))
