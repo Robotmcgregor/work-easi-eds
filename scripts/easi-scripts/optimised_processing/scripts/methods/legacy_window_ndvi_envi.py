@@ -377,6 +377,26 @@ def sanitise_sr_for_log(arr: np.ndarray, nodata: float = -9999.0) -> np.ndarray:
     out[out < 0] = 0.0
     return out
 
+
+def infer_sr_scale_factor(sr_stack: np.ndarray) -> float:
+    """Infer an SR scale factor for GA0-like SR stacks.
+
+    Many GA0 SR products encode reflectance as reflectance*10000 (0..10000).
+    The legacy coefficients expect reflectance-scale magnitudes before log1p().
+
+    Heuristic: if the median nonzero of band 5 (NIR, 1-based) is > ~2, assume
+    scale=10000.
+    """
+    if sr_stack.ndim != 3 or sr_stack.shape[0] < 5:
+        return 1.0
+
+    b5 = sr_stack[4].astype(np.float32, copy=False)
+    b5 = b5[np.isfinite(b5) & (b5 != 0)]
+    if b5.size == 0:
+        return 1.0
+    med = float(np.median(b5))
+    return 10000.0 if med > 2.0 else 1.0
+
 # def write_envi(
 #     out_path: str,
 #     arrays: List[np.ndarray],
@@ -451,20 +471,43 @@ def normalise_ndvi(arr: np.ndarray) -> np.ndarray:
     """
     Normalize NDVI values to 0-255 range.
     
-    NDVI input is expected to be in [0, 200] (representing [-1, 1] NDVI).
+    Supports both:
+      - legacy scaled NDVI in [0, 200] (representing [-1, 1]) where 0 is often nodata
+      - float NDVI in [-1, 1] with nodata typically -9999
+
     We normalize using the same approach as FPC: center at 125 with scale ~= 15.
-    Zeros are treated as nodata.
     """
-    valid = arr > 0
+    a = arr.astype(np.float32, copy=False)
+    finite = np.isfinite(a)
+
+    # Common nodata sentinel used by our pipeline after warping.
+    nodata_mask = a <= -9990.0
+
+    # Decide which NDVI encoding we have.
+    v = a[finite & ~nodata_mask]
+    if v.size == 0:
+        return np.zeros_like(a, dtype=np.uint8)
+
+    p99_abs = float(np.percentile(np.abs(v), 99))
+
+    if p99_abs <= 1.5:
+        # Float NDVI in approx [-1, 1]. Do NOT discard negative NDVI.
+        scaled = (a + 1.0) * 100.0  # [-1,1] -> [0,200]
+        valid = finite & ~nodata_mask
+    else:
+        # Assume legacy 0..200 encoding. In this regime, 0 is typically nodata/fill.
+        scaled = a
+        valid = finite & (a > 0)
+
     if not np.any(valid):
-        return np.zeros_like(arr, dtype=np.uint8)
-    
-    mean = arr[valid].mean()
-    std = arr[valid].std()
-    if std == 0:
+        return np.zeros_like(a, dtype=np.uint8)
+
+    mean = float(np.mean(scaled[valid]))
+    std = float(np.std(scaled[valid]))
+    if std == 0 or not np.isfinite(std):
         std = 1.0
-    
-    norm = 125 + 15 * (arr.astype(np.float32) - mean) / std
+
+    norm = 125.0 + 15.0 * (scaled - mean) / std
     norm = np.clip(norm, 1, 255).astype(np.uint8)
     norm[~valid] = 0
     return norm
@@ -632,6 +675,18 @@ def main(argv=None) -> int:
         help="Resampling used when aligning dc4 to db8 grid (default: bilinear)",
     )
 
+    ap.add_argument(
+        "--sr-scale",
+        type=float,
+        default=None,
+        help="Divide SR bands by this factor before log1p() (e.g. 10000 for reflectance*10000 products).",
+    )
+    ap.add_argument(
+        "--no-auto-sr-scale",
+        action="store_true",
+        help="Disable SR scale auto-detection (by default, auto-detects reflectance*10000 and rescales).",
+    )
+
     args = ap.parse_args(argv)
 
     scene = args.scene.lower()
@@ -692,6 +747,34 @@ def main(argv=None) -> int:
     # Sanitise SR stacks so nodata/fill values do not break log1p()
     ref_start = sanitise_sr_for_log(ref_start, nodata=-9999.0)
     ref_end = sanitise_sr_for_log(ref_end, nodata=-9999.0)
+
+    # ------------------------------------------------------------------
+    # SR scale handling (high impact for legacy log1p spectral coefficients)
+    # ------------------------------------------------------------------
+    if args.sr_scale is not None:
+        sr_scale = float(args.sr_scale)
+    elif args.no_auto_sr_scale:
+        sr_scale = 1.0
+    else:
+        sr_scale = infer_sr_scale_factor(ref_start)
+
+    if sr_scale <= 0:
+        raise ValueError(f"Invalid --sr-scale: {sr_scale}")
+
+    if args.verbose:
+        print(f"[VALIDATION] sr_scale_factor: {sr_scale} (applied as ref /= sr_scale before log1p)")
+
+    if sr_scale != 1.0:
+        ref_start = (ref_start / sr_scale).astype(np.float32)
+        ref_end = (ref_end / sr_scale).astype(np.float32)
+
+        # Safety: keep any tiny negatives at 0
+        ref_start[ref_start < 0] = 0.0
+        ref_end[ref_end < 0] = 0.0
+
+        if args.verbose:
+            _print_stack_summary("db8_start_scaled", ref_start, band_indices_0based=[1, 2, 4, 5])
+            _print_stack_summary("db8_end_scaled", ref_end, band_indices_0based=[1, 2, 4, 5])
 
     # Load NDVI dc4 images (optionally align to start_db8 grid)
     raw_ndvi = []
