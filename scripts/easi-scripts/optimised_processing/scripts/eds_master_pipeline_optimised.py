@@ -98,6 +98,19 @@ def parse_args():
     ap.add_argument('--clear-threshold', type=int, default=80)
     ap.add_argument('--min-area-ha', type=float, default=10.0)
 
+    # Legacy-method controls (for A/B comparisons)
+    ap.add_argument(
+        '--legacy-sr-scale',
+        type=float,
+        default=None,
+        help='Pass-through to legacy method: divide SR by this factor before log1p() (e.g. 10000).',
+    )
+    ap.add_argument(
+        '--legacy-no-auto-sr-scale',
+        action='store_true',
+        help='Pass-through to legacy method: disable SR scale auto-detection.',
+    )
+
     ap.add_argument(
         '--copy-to-home',
         action='store_true',
@@ -492,6 +505,8 @@ def main():
         diagnostics=bool(args.diagnostics),
         verbose=bool(args.verbose),
         vi_tag='vi-ndvi',
+        sr_scale=args.legacy_sr_scale,
+        no_auto_sr_scale=bool(args.legacy_no_auto_sr_scale),
         output_dir=paths.legacy_outputs,
         diagnostics_dir=paths.diagnostics,
     )

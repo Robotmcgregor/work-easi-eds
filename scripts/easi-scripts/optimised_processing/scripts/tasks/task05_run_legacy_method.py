@@ -29,6 +29,8 @@ def run_legacy_ndvi_window(
     diagnostics: bool = False,
     verbose: bool = False,
     vi_tag: str = "vi-ndvi",
+    sr_scale: float | None = None,
+    no_auto_sr_scale: bool = False,
     output_dir: Path | None = None,
     diagnostics_dir: Path | None = None,
     home_out_dir: str | Path | None = None,
@@ -94,6 +96,11 @@ def run_legacy_ndvi_window(
         cmd.append("--verbose")
     if diagnostics:
         cmd.append("--diagnostics")
+
+    if sr_scale is not None:
+        cmd.extend(["--sr-scale", str(float(sr_scale))])
+    if no_auto_sr_scale:
+        cmd.append("--no-auto-sr-scale")
 
     print("[RUN]", " ".join(cmd))
     subprocess.check_call(cmd, cwd=output_dir)
