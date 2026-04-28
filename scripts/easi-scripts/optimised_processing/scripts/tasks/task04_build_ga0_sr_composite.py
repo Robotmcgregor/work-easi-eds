@@ -284,7 +284,7 @@ def build_ga0_sr_to_s3(
     #         PLATFORM=platform,
     #         CLOUD_MAX=str(cloud_max),
     #     )
-    with rasterio.open(local_raw_tif, "w", **profile) as dst:
+    with rasterio.open(str(local_raw_tif), "w", **profile) as dst:
         dst.write(stack_raw)
         dst.update_tags(
             SOFTWARE="optimised_processing",
@@ -294,7 +294,7 @@ def build_ga0_sr_to_s3(
             MASK_STATE="none",
         )
 
-    with rasterio.open(local_clr_tif, "w", **profile) as dst:
+    with rasterio.open(str(local_clr_tif), "w", **profile) as dst:
         dst.write(stack_clr)
         dst.update_tags(
             SOFTWARE="optimised_processing",
@@ -303,6 +303,11 @@ def build_ga0_sr_to_s3(
             CLOUD_MAX=str(cloud_max),
             MASK_STATE="clr",
         )
+
+    if not local_raw_tif.exists():
+        raise RuntimeError(f"Expected GA0 raw temp tif was not created: {local_raw_tif}")
+    if not local_clr_tif.exists():
+        raise RuntimeError(f"Expected GA0 clr temp tif was not created: {local_clr_tif}")
     # Convert to COG (keeps values identical; adds overviews)
     to_cog(str(local_raw_tif), str(local_raw_cog), overwrite=True)
     to_cog(str(local_clr_tif), str(local_clr_cog), overwrite=True)

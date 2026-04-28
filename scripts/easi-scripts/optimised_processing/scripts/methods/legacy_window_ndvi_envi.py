@@ -915,8 +915,10 @@ def main(argv=None) -> int:
 
     # Compute change indices
     # ndvi_trend: how much the (normalised) NDVI changed between start and end.
-    # This mirrors fpcDiff in the FC script but uses NDVI instead of FPC.
-    ndvi_trend = norm_end.astype(np.float32) - norm_start.astype(np.float32)
+    # IMPORTANT: treat norm==0 as nodata and do not let nodata differences dominate.
+    ndvi_valid = (norm_start > 0) & (norm_end > 0)
+    ndvi_trend = (norm_end.astype(np.float32) - norm_start.astype(np.float32))
+    ndvi_trend[~ndvi_valid] = 0.0
 
     # Spectral index from SR (db8) — use the same legacy weighted log1p combination
     # as the FC script. This looks at start vs end reflectance for bands 2,3,5,6.
@@ -941,8 +943,8 @@ def main(argv=None) -> int:
     # t_test: how far observed end NDVI is from the baseline mean (std units)
     s_test = np.zeros_like(norm_end, dtype=np.float32)
     t_test = np.zeros_like(norm_end, dtype=np.float32)
-    valid_stderr = base_stderr >= 0.2
-    valid_std = base_std >= 0.2
+    valid_stderr = (base_stderr >= 0.2) & ndvi_valid
+    valid_std = (base_std >= 0.2) & ndvi_valid
     prediction_decimal_year = decimal_year(ed)
     predicted_normed_ndvi = base_intercept + base_slope * prediction_decimal_year
     observed_normed_ndvi = norm_end.astype(np.float32)
