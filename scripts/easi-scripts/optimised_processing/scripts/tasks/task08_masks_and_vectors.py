@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+"""Task 08: create masks and shapefiles from the DLJ output.
+
+Non-coder summary:
+- DLJ contains an interpretation band we treat as "clearing probability".
+- We threshold that band to create two mask rasters:
+    - strong: more conservative (default >= 60)
+    - clear:  more confident (default >= 80)
+- We then polygonise those masks to create shapefiles.
+
+These are typically the artefacts used for QA and for area calculations.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
@@ -80,12 +92,12 @@ def _polygonise_mask(
 
     # optionally drop tiny polygons
     if min_area_ha and float(min_area_ha) > 0:
-        gdf = gdf[gdf["area_ha"] >= float(min_area_ha)].copy()
+        gdf = gdf.loc[gdf["area_ha"] >= float(min_area_ha)].copy()
 
     # try to clean invalid geometry (buffer(0) hack)
     try:
         gdf["geometry"] = gdf["geometry"].buffer(0)
-        gdf = gdf[gdf.geometry.notnull() & ~gdf.geometry.is_empty]
+        gdf = gdf.loc[gdf.geometry.notnull() & ~gdf.geometry.is_empty].copy()
     except Exception:
         # ignore if it fails
         pass
@@ -109,9 +121,7 @@ def _upload_shapefile_folder(local_dir: Path, bucket: str, s3_prefix: str) -> No
             upload_file_to_s3(str(p), bucket=bucket, key=key)
 
 def _output_base_from_dlj(dljmz_cog_local: Path) -> str:
-    """
-    Use the final DLJ filename stem as the base for downstream masks/vectors.
-    """
+    """Use the DLJ filename stem as the base for downstream masks/vectors."""
     return Path(dljmz_cog_local).stem
 
 def make_masks_and_vectors(
@@ -128,10 +138,11 @@ def make_masks_and_vectors(
     rebase: bool = False,
     dry_run: bool = False,
 ) -> MaskVectorOutputs:
-    """
-        Build strong/clear masks under the supplied work_dir and upload them to:
-            {s3_prefix}/tiles/{tile}/outputs/{run_tag}/masks
-            {s3_prefix}/tiles/{tile}/outputs/{run_tag}/vectors
+    """Create strong/clear masks and shapefiles for this run, then upload to S3.
+
+    S3 destinations:
+      {s3_prefix}/tiles/{tile}/outputs/{run_tag}/masks
+      {s3_prefix}/tiles/{tile}/outputs/{run_tag}/vectors
     """
     tile = tile.lower().strip()
     work_dir = Path(work_dir)

@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+"""Task 06: convert the legacy outputs to COG GeoTIFF and upload to S3.
+
+Non-coder summary:
+- The legacy method historically produced ENVI `.img` files.
+- For modern tooling, we want Cloud Optimised GeoTIFFs (COGs).
+- This task makes sure DLL and DLJ are:
+    1) GeoTIFF
+    2) COG (fast cloud-readable)
+    3) uploaded to the run output folder in S3
+
+It supports both cases:
+- source outputs are ENVI `.img` (convert then COG)
+- source outputs are already `.tif` (just COG)
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -24,9 +39,7 @@ class ConvertedOutputs:
 
 
 def _envi_img_to_tif(src_img: Path, dst_tif: Path) -> None:
-    """
-    Convert an ENVI .img file to a GeoTIFF.
-    """
+    """Convert an ENVI `.img` file to a plain GeoTIFF (not yet a COG)."""
     with rasterio.open(src_img) as src:
         profile = src.profile.copy()
         profile.update(driver="GTiff")
@@ -50,15 +63,7 @@ def convert_outputs_to_cog_and_upload(
     run_tag: str,
     work_dir: Path,
 ) -> ConvertedOutputs:
-    """
-    Convert outputs to final named COG GeoTIFFs and upload to S3.
-
-    Supports either:
-    - legacy ENVI .img inputs, or
-    - already-written GeoTIFF inputs.
-
-    If the source is already a GeoTIFF, it skips ENVI conversion and just COGifies it.
-    """
+    """Convert DLL/DLJ to final COG GeoTIFF names and upload to S3."""
     tile = tile.lower().strip()
 
     work_dir = Path(work_dir)

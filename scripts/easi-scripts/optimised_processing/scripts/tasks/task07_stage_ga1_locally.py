@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""Task 07: stage GA1 NDVI files locally.
+
+Non-coder summary:
+- Earlier steps ensure NDVI scenes exist in S3.
+- The legacy method reads files from disk (local paths), not directly from S3.
+- This task downloads the required NDVI COGs into a local folder for this run.
+"""
+
 from pathlib import Path
 
 from lib.s3_io import download_s3_uri, s3_key_exists
@@ -14,10 +22,10 @@ def stage_ga1_ndvi_locally(
     work_dir: Path,
     dry_run: bool = False,
 ) -> Path:
-    """
-    Download required NDVI COGs from S3 into the supplied canonical staging directory.
-    required_dates: list of (YYYYMMDD, platform, epsg)
-    Returns the local directory containing the files.
+    """Download the required NDVI COGs from S3 into a local staging directory.
+
+    `required_dates` is a list of (YYYYMMDD, platform, epsg).
+    Returns the directory containing the downloaded files.
     """
     tile = tile.lower().strip()
     work_dir = Path(work_dir)

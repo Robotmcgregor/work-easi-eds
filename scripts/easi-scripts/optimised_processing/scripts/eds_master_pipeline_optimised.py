@@ -1,6 +1,41 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+"""Optimised EDS processing pipeline (NDVI seasonal-window; datacube-native).
+
+This file is the *main entrypoint* people run.
+
+In plain English, it:
+1) Picks a "best" start and end Landsat SR scene for your requested dates.
+2) Builds a list of NDVI scenes in a seasonal window (baseline time-series).
+3) Ensures NDVI scenes exist in S3 (builds them if missing).
+4) Downloads NDVI scenes locally (so the legacy method can read them).
+5) Builds SR composites (GA0) for the chosen start/end dates.
+6) Runs the legacy seasonal-window change-detection method to produce DLL/DLJ.
+7) Converts outputs to GeoTIFF COGs and uploads them to S3.
+8) Creates masks + shapefiles for "strong" and "clear" detections.
+
+Key idea: everything is written into a *run-scoped folder* so repeated runs don't
+overwrite each other (see --run-tag/--run-id).
+
+Local run layout:
+    <work-dir>/<tile>/<run-tag>/
+        ndvi_work/       # scratch space for building NDVI scenes
+        ga1_stage/       # local downloaded NDVI COGs
+        ga0_work/        # scratch space for SR composites
+        legacy_outputs/  # DLL/DLJ outputs produced by the legacy method
+        outputs_cog/     # converted COG outputs ready for upload
+        maskvec_work/    # masks + vectors created from DLJ
+        diagnostics/     # optional stats CSVs/JSONs/plots
+        sr_raw_cog/      # optional export of raw SR composites
+
+S3 layout:
+    Scene-date outputs:
+        {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/...
+    Final run outputs:
+        {s3_prefix}/tiles/{tile}/outputs/{run_tag}/...
+"""
+
 import argparse
 from dataclasses import dataclass
 import math
@@ -17,31 +52,16 @@ from tasks.task07_stage_ga1_locally import stage_ga1_ndvi_locally
 from tasks.task08_masks_and_vectors import make_masks_and_vectors
 
 
-"""Optimised EDS processing pipeline (NDVI seasonal-window; datacube-native).
-
-This pipeline keeps the existing scientific workflow but writes all local artifacts
-and final S3 outputs into a single run-scoped layout (see --run-tag/--run-id).
-
-Local run layout:
-  <work-dir>/<tile>/<run-tag>/
-    ndvi_work/
-    ga1_stage/
-    ga0_work/
-    legacy_outputs/
-    outputs_cog/
-    maskvec_work/
-    diagnostics/
-    sr_raw_cog/          # optional
-
-S3 layout:
-  Scene-date outputs:
-    {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/...
-  Final run outputs:
-    {s3_prefix}/tiles/{tile}/outputs/{run_tag}/...
-"""
-
-
 def parse_args():
+    """Parse command-line arguments.
+
+    These flags are grouped roughly as:
+    - What to process: tile, start/end date
+    - Where data lives: S3 bucket/prefix and local work directory
+    - Data quality controls: cloud-max
+    - A/B testing knobs for the legacy method: SR scaling + baseline stats mode
+    - Debugging outputs: --verbose, --diagnostics, --stop-after-dlj
+    """
     ap = argparse.ArgumentParser('Optimised EDS processing (NDVI seasonal window)')
 
     ap.add_argument('--tile', required=True, help='e.g. p115r078')
@@ -231,6 +251,13 @@ def _dlj_has_any_valid_pixels(path: Path) -> bool:
 
 @dataclass(frozen=True)
 class RunPaths:
+    """All folders used for a single run.
+
+    A *run* is identified by tile + run_tag.
+    Keeping run folders separate makes it easy to:
+    - run the same tile multiple times without overwriting outputs
+    - compare different settings (e.g. SR scaling) side-by-side
+    """
     run_root: Path
     ndvi_work: Path
     ga1_stage: Path
@@ -275,6 +302,7 @@ class RunPaths:
 
 
 def _copy_run_artifact(src: Path, dst_dir: Path) -> Path:
+    """Copy a file into a run folder (used for optional exports)."""
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / src.name
     if src.resolve() != dst.resolve():
@@ -283,11 +311,17 @@ def _copy_run_artifact(src: Path, dst_dir: Path) -> Path:
 
 
 def _norm_yyyymmdd(iso: str) -> str:
+    """Convert YYYY-MM-DD into YYYYMMDD (the pipeline's internal date format)."""
     y, m, d = iso.split('-')
     return f'{y}{m}{d}'
 
 
 def _extract_epsg(value) -> int | None:
+    """Try to pull an EPSG code out of a variety of values.
+
+    This exists because some inputs come from shapefiles/metadata where CRS may be
+    stored as an int, a string like "EPSG:32756", or embedded in WKT.
+    """
     if value is None:
         return None
 
@@ -313,6 +347,7 @@ def _extract_epsg(value) -> int | None:
 
 
 def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
+    """Given a lon/lat point, return the WGS84 UTM EPSG code for that location."""
     zone = int(math.floor((lon + 180.0) / 6.0) + 1)
     if lat >= 0:
         return 32600 + zone
@@ -320,11 +355,12 @@ def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
 
 
 def resolve_output_epsg_from_row(row, cli_target_epsg: int) -> int:
-    """
-    Priority:
-      1. explicit CLI override
-      2. derive WGS84 UTM from bbox centre
-      3. fallback to existing EPSG-like fields if bbox missing
+    """Choose the output CRS (EPSG code) for a scene.
+
+    Priority order:
+    1) If the user provided --target-epsg, use it.
+    2) Otherwise, derive WGS84 UTM from the scene bbox centre.
+    3) If bbox is missing, try to fall back to any EPSG-like field present.
     """
     if cli_target_epsg and int(cli_target_epsg) > 0:
         return int(cli_target_epsg)
@@ -358,6 +394,7 @@ def resolve_output_epsg_from_row(row, cli_target_epsg: int) -> int:
 
 
 def main():
+    """Run the pipeline end-to-end for one tile and one start/end date pair."""
     args = parse_args()
     tile = args.tile.lower().strip()
 
@@ -371,6 +408,11 @@ def main():
     print(f'[INFO] Local run root: {paths.run_root}')
     print(f"[INFO] Run outputs S3 prefix: {args.s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}")
 
+    # ------------------------------------------------------------------
+    # STEP 1: Pick the best SR start/end scenes.
+    # We may not get the exact dates requested: the resolver picks the closest
+    # acceptable (low cloud) scene around your requested start/end.
+    # ------------------------------------------------------------------
     sr = resolve_sr_start_end(
         tile=tile,
         tile_shp=args.tile_shp,
@@ -395,6 +437,10 @@ def main():
     print(f"[INFO] Effective SR start: {eff_sd} (product={sr.start_row['product']}, cloud={float(sr.start_row['cloud']):.2f})")
     print(f"[INFO] Effective SR end:   {eff_ed} (product={sr.end_row['product']}, cloud={float(sr.end_row['cloud']):.2f})")
 
+    # ------------------------------------------------------------------
+    # STEP 2: Build the seasonal NDVI baseline plan.
+    # This is the list of NDVI scenes we want to use as the baseline time-series.
+    # ------------------------------------------------------------------
     plan = build_seasonal_ndvi_plan(
         tile=tile,
         tile_shp=args.tile_shp,
@@ -421,6 +467,10 @@ def main():
     print(f'[INFO] Seasonal window: {plan.window.window_start_mmdd} -> {plan.window.window_end_mmdd} (months {plan.window.months_hint()})')
     print(f'[INFO] NDVI scenes in seasonal plan: {len(plan.required_rows)}')
 
+    # ------------------------------------------------------------------
+    # STEP 3: Ensure required NDVI scenes exist in S3.
+    # If a required NDVI scene is missing (or --rebase is set), it is computed.
+    # ------------------------------------------------------------------
     ensure_seasonal_ndvi_in_s3(
         plan=plan,
         tile=tile,
@@ -444,6 +494,10 @@ def main():
         print('[DRY] Skipping legacy method run + output conversion.')
         return
 
+    # ------------------------------------------------------------------
+    # STEP 4: Download (stage) NDVI scenes locally.
+    # The legacy method expects local file paths.
+    # ------------------------------------------------------------------
     ga1_dir = stage_ga1_ndvi_locally(
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
@@ -453,6 +507,10 @@ def main():
         dry_run=bool(args.dry_run),
     )
 
+    # ------------------------------------------------------------------
+    # STEP 5: Build SR composites (GA0) for start and end.
+    # These are 6-band stacks used by the legacy spectral index.
+    # ------------------------------------------------------------------
     ga0_start = build_ga0_sr_to_s3(
         tile=tile,
         date=eff_sd,
@@ -507,6 +565,12 @@ def main():
     print(f'[INFO] Using start db8 masked stack: {ga0_start.local_clr_path}')
     print(f'[INFO] Using end   db8 masked stack: {ga0_end.local_clr_path}')
 
+    # ------------------------------------------------------------------
+    # STEP 6: Run the legacy seasonal-window change detection method.
+    # This produces:
+    # - DLL: change "class" raster (integers like 10, 34..39)
+    # - DLJ: interpretation raster (multiple bands including clearing probability)
+    # ------------------------------------------------------------------
     outputs = run_legacy_ndvi_window(
         methods_dir=Path(__file__).parent / 'methods',
         scene=tile,
@@ -557,6 +621,10 @@ def main():
         if bool(args.stop_after_dlj):
             raise SystemExit("dlj failure")
 
+    # ------------------------------------------------------------------
+    # STEP 7: Convert outputs to Cloud Optimised GeoTIFFs (COGs) and upload.
+    # COGs are easier to use in GIS tools and faster to read from cloud storage.
+    # ------------------------------------------------------------------
     converted = convert_outputs_to_cog_and_upload(
         dll_src_img=outputs.dll_img,
         dlj_src_img=outputs.dlj_img,
@@ -584,6 +652,10 @@ def main():
     for u in converted.uploaded:
         print('[OK]', u.s3_uri)
 
+    # ------------------------------------------------------------------
+    # STEP 8: Create masks + shapefiles.
+    # These are the outputs most people use for area summaries and QA.
+    # ------------------------------------------------------------------
     mv = make_masks_and_vectors(
         dljmz_cog_local=dljmz_cog_local,
         bucket=args.s3_bucket,

@@ -1,5 +1,21 @@
 from __future__ import annotations
 
+"""Task 05: run the legacy seasonal-window change detection method.
+
+Non-coder summary:
+- This task runs the legacy script (a separate Python program) as a subprocess.
+- Inputs are file paths created by earlier pipeline steps:
+    - GA0 SR start/end composites (6-band stacks)
+    - A set of staged NDVI scenes (baseline time-series)
+- Outputs are the main rasters people compare between runs:
+    - DLL: change "class" raster (integer codes)
+    - DLJ: interpretation raster (multiple bands including clearing probability)
+
+We keep this as a dedicated task so the main pipeline can:
+- keep all outputs in the run folder
+- pass A/B test flags through consistently (SR scaling, baseline stats mode)
+"""
+
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +52,7 @@ def run_legacy_ndvi_window(
     diagnostics_dir: Path | None = None,
     home_out_dir: str | Path | None = None,
 ) -> LegacyOutputs:
+    """Run the legacy method script and return the expected output paths."""
     script = Path(methods_dir) / "legacy_window_ndvi_envi.py"
     if not script.exists():
         raise FileNotFoundError(f"Missing legacy method script: {script}")
