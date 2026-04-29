@@ -842,6 +842,17 @@ def main(argv=None) -> int:
         sr_scale = infer_sr_scale_factor(ref_start)
         sr_scale_source = "auto"
 
+    def _fmt_factor_for_name(x: float) -> str:
+        try:
+            xi = int(round(float(x)))
+            if abs(float(x) - float(xi)) < 1e-6:
+                return str(xi)
+        except Exception:
+            pass
+        return (f"{float(x):.6g}").replace(".", "p").replace("-", "m")
+
+    diag_suffix = f"sr-{sr_scale_source}-{_fmt_factor_for_name(sr_scale)}_base-{'legacy' if args.baseline_include_nodata else 'nodataaware'}"
+
     if sr_scale <= 0:
         raise ValueError(f"Invalid --sr-scale: {sr_scale}")
 
@@ -1398,7 +1409,8 @@ def main(argv=None) -> int:
         )
         vals = ndviDiffStdErr[diag_mask]
 
-        diag_name = f"{platform}olre_{tile}_d{sd}{ed}_{args.vi_tag}_e{epsg}"
+        diag_name_base = f"{platform}olre_{tile}_d{sd}{ed}_{args.vi_tag}_e{epsg}"
+        diag_name = f"{diag_name_base}_{diag_suffix}"
 
         stats_csv = _join_out(diagnostics_base, f"{diag_name}_ndviDiffStdErr_stats.csv")
         bins_csv  = _join_out(diagnostics_base, f"{diag_name}_ndviDiffStdErr_bins.csv")
@@ -1487,6 +1499,41 @@ def main(argv=None) -> int:
         summary_csv = _join_out(diagnostics_base, f"{diag_name}_summary.csv")
         _write_text_anywhere(str(summary_csv), csv_buf.getvalue(), encoding="utf-8")
         print(f"[DIAG] Summary CSV: {summary_csv}")
+
+        # ---- SR scaling verification CSV (dedicated, one-row) ----
+        # Captures pre/post scaling SR band percentiles for the key legacy bands (B2,B3,B5,B6)
+        # so SR scaling behaviour can be audited across tiles.
+        sr_row = {
+            "scene": scene,
+            "tile": tile,
+            "platform": platform,
+            "start_date": sd,
+            "end_date": ed,
+            "sr_scale_factor": float(sr_scale),
+            "sr_scale_source": sr_scale_source,
+            "baseline_include_nodata": bool(args.baseline_include_nodata),
+        }
+
+        # Re-compute raw-vs-scaled band stats.
+        # NOTE: ref_start/ref_end have already had scaling applied (if any) by this point.
+        # We reconstruct "raw" as "scaled * sr_scale" for verification purposes.
+        bands_0 = [1, 2, 4, 5]  # B2,B3,B5,B6
+        for which, arr_scaled in (("start", ref_start), ("end", ref_end)):
+            for b0 in bands_0:
+                band_scaled = arr_scaled[b0].astype(np.float32)
+                band_raw = band_scaled * float(sr_scale)
+
+                sr_row.update(_flatten_pct(f"{which}_b{b0+1}_raw", _pct(band_raw, treat_zero_as_nodata=True)))
+                sr_row.update(_flatten_pct(f"{which}_b{b0+1}_scaled", _pct(band_scaled, treat_zero_as_nodata=True)))
+
+        sr_csv_buf = io.StringIO()
+        sr_writer = csv.DictWriter(sr_csv_buf, fieldnames=list(sr_row.keys()), extrasaction="ignore")
+        sr_writer.writeheader()
+        sr_writer.writerow(sr_row)
+
+        sr_verify_csv = _join_out(diagnostics_base, f"{diag_name}_sr_scale_verify.csv")
+        _write_text_anywhere(str(sr_verify_csv), sr_csv_buf.getvalue(), encoding="utf-8")
+        print(f"[DIAG] SR scale verify CSV: {sr_verify_csv}")
 
         try:
             import matplotlib.pyplot as plt
