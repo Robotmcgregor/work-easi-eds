@@ -119,6 +119,15 @@ def parse_args():
     )
 
     ap.add_argument(
+        '--legacy-baseline-include-nodata',
+        action='store_true',
+        help=(
+            'Pass-through to legacy method: use LEGACY baseline stats (include nodata zeros in baseline mean/std/slope). '
+            'Default (recommended) ignores zeros (treats 0 as nodata).'
+        ),
+    )
+
+    ap.add_argument(
         '--copy-to-home',
         action='store_true',
         help='Copy ga0 + outputs + masks + shapefiles to a folder under /home/jovyan for easy retrieval.',
@@ -514,6 +523,7 @@ def main():
         vi_tag='vi-ndvi',
         sr_scale=args.legacy_sr_scale,
         no_auto_sr_scale=bool(args.legacy_no_auto_sr_scale),
+        baseline_include_nodata=bool(args.legacy_baseline_include_nodata),
         output_dir=paths.legacy_outputs,
         diagnostics_dir=paths.diagnostics,
     )

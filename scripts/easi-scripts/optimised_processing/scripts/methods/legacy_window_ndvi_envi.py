@@ -514,34 +514,99 @@ def normalise_ndvi(arr: np.ndarray) -> np.ndarray:
 
 
 def timeseries_stats(
-    norm_list: List[np.ndarray], date_list: List[str]
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Compute baseline statistics across normalized NDVI stack."""
-    stack = np.stack([a.astype(np.float32) for a in norm_list], axis=0)
-    mean = stack.mean(axis=0)
-    std = stack.std(axis=0)
-    n = stack.shape[0]
-    if n > 1:
-        stderr = std / math.sqrt(n)
-    else:
-        stderr = np.zeros_like(mean)
+    norm_list: List[np.ndarray],
+    date_list: List[str],
+    *,
+    include_nodata_zeros: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute baseline statistics across normalized NDVI stack.
 
-    if n > 1:
-        t = np.array([decimal_year(d) for d in date_list], dtype=np.float32)
-        t_mean = t.mean()
-        denom = np.sum((t - t_mean) ** 2)
-        if denom == 0:
+    Normalised NDVI uses 0 as nodata. By default we IGNORE zeros when computing
+    baseline mean/std/stderr and regression slope/intercept.
+
+    Set include_nodata_zeros=True to force legacy behaviour (treat zeros as data).
+
+    Returns: mean, std, stderr, slope, intercept, n_valid
+    """
+    stack = np.stack([a.astype(np.float32) for a in norm_list], axis=0)
+    n_total = int(stack.shape[0])
+
+    if include_nodata_zeros:
+        mean = stack.mean(axis=0)
+        std = stack.std(axis=0)
+        n_valid = np.full(mean.shape, n_total, dtype=np.int16)
+        if n_total > 1:
+            stderr = std / math.sqrt(n_total)
+        else:
+            stderr = np.zeros_like(mean)
+
+        if n_total > 1:
+            t = np.array([decimal_year(d) for d in date_list], dtype=np.float32)
+            t_mean = t.mean()
+            denom = np.sum((t - t_mean) ** 2)
+            if denom == 0:
+                slope = np.zeros_like(mean)
+                intercept = mean.copy()
+            else:
+                y_mean = mean
+                slope = np.sum(((t - t_mean)[:, None, None]) * (stack - y_mean), axis=0) / denom
+                intercept = y_mean - slope * t_mean
+        else:
             slope = np.zeros_like(mean)
             intercept = mean.copy()
-        else:
-            y_mean = mean
-            slope = np.sum(((t - t_mean)[:, None, None]) * (stack - y_mean), axis=0) / denom
-            intercept = y_mean - slope * t_mean
+
+        return mean, std, stderr, slope, intercept, n_valid
+
+    # Default (improved): ignore nodata zeros
+    valid = stack > 0
+    n_valid = valid.sum(axis=0).astype(np.int16)
+    n_valid_f = n_valid.astype(np.float32)
+
+    sum_y = (stack * valid).sum(axis=0)
+    mean = np.zeros_like(sum_y, dtype=np.float32)
+    mean[n_valid > 0] = (sum_y[n_valid > 0] / n_valid_f[n_valid > 0]).astype(np.float32)
+
+    # std over valid observations only
+    resid = (stack - mean[None, :, :])
+    var = np.zeros_like(mean, dtype=np.float32)
+    if np.any(n_valid > 0):
+        sse = ((resid * resid) * valid).sum(axis=0)
+        var[n_valid > 0] = (sse[n_valid > 0] / n_valid_f[n_valid > 0]).astype(np.float32)
+    std = np.sqrt(var, dtype=np.float32)
+
+    stderr = np.zeros_like(std, dtype=np.float32)
+    mask2 = n_valid > 1
+    if np.any(mask2):
+        stderr[mask2] = std[mask2] / np.sqrt(n_valid_f[mask2])
+
+    # Per-pixel masked linear regression (closed form) using only valid dates
+    slope = np.zeros_like(mean, dtype=np.float32)
+    intercept = np.zeros_like(mean, dtype=np.float32)
+
+    if n_total > 1:
+        t = np.array([decimal_year(d) for d in date_list], dtype=np.float32)
+        tt = (t * t).astype(np.float32)
+
+        sum_t = ((t[:, None, None]) * valid).sum(axis=0)
+        sum_tt = ((tt[:, None, None]) * valid).sum(axis=0)
+        sum_ty = ((t[:, None, None]) * (stack * valid)).sum(axis=0)
+
+        den = (n_valid_f * sum_tt) - (sum_t * sum_t)
+        ok = (n_valid >= 2) & (den != 0)
+        if np.any(ok):
+            slope[ok] = ((n_valid_f[ok] * sum_ty[ok]) - (sum_t[ok] * sum_y[ok])) / den[ok]
+            intercept[ok] = (sum_y[ok] - slope[ok] * sum_t[ok]) / n_valid_f[ok]
+
+        # For pixels with <2 obs, fall back to mean and zero slope.
+        ok0 = (n_valid == 1)
+        if np.any(ok0):
+            intercept[ok0] = mean[ok0]
+
     else:
-        slope = np.zeros_like(mean)
-        intercept = mean.copy()
-    
-    return mean, std, stderr, slope, intercept
+        # Single baseline image
+        intercept[n_valid > 0] = mean[n_valid > 0]
+
+    return mean, std, stderr, slope, intercept, n_valid
 
 
 def stretch(
@@ -691,6 +756,15 @@ def main(argv=None) -> int:
         help=(
             "Disable SR scale auto-detection and FORCE no scaling (sr_scale_factor=1). "
             "By default, scaling is auto-detected and reflectance*10000 products are rescaled."
+        ),
+    )
+
+    ap.add_argument(
+        "--baseline-include-nodata",
+        action="store_true",
+        help=(
+            "Use LEGACY baseline statistics behaviour: include nodata zeros when computing baseline mean/std/stderr/slope. "
+            "Default (recommended) ignores zeros (treats 0 as nodata)."
         ),
     )
 
@@ -919,8 +993,10 @@ def main(argv=None) -> int:
     norm_end = normalise_ndvi(end_ndvi)
 
     # Compute baseline statistics
-    base_mean, base_std, base_stderr, base_slope, base_intercept = timeseries_stats(
-        norm_baseline, baseline_dates
+    base_mean, base_std, base_stderr, base_slope, base_intercept, base_n_valid = timeseries_stats(
+        norm_baseline,
+        baseline_dates,
+        include_nodata_zeros=bool(args.baseline_include_nodata),
     )
 
     # Compute change indices
@@ -981,6 +1057,15 @@ def main(argv=None) -> int:
             f"[VALIDATION] valid_std_pct: {float(np.mean(base_std >= 0.2) * 100):.3f}% | "
             f"valid_stderr_pct: {float(np.mean(base_stderr >= 0.2) * 100):.3f}%"
         )
+        try:
+            nz = base_n_valid[base_n_valid > 0]
+            if nz.size:
+                p = np.percentile(nz.astype(np.float32), [0, 5, 50, 95, 100])
+                print(
+                    f"[VALIDATION] baseline_n_valid: min={p[0]:.3g} p05={p[1]:.3g} p50={p[2]:.3g} p95={p[3]:.3g} max={p[4]:.3g} (total_baseline={len(norm_baseline)})"
+                )
+        except Exception:
+            pass
         _print_metric_summary("spectral_index", spectral_index, treat_zero_as_nodata=True)
         _print_metric_summary("ndvi_trend(norm_end-norm_start)", ndvi_trend, treat_zero_as_nodata=False)
         _print_metric_summary("t_test", t_test, treat_zero_as_nodata=True)
@@ -1328,6 +1413,8 @@ def main(argv=None) -> int:
             "lookback": int(args.lookback),
             "sr_scale_factor": float(sr_scale),
             "sr_scale_source": sr_scale_source,
+            "baseline_include_nodata": bool(args.baseline_include_nodata),
+            "baseline_n_valid": _pct(base_n_valid.astype(np.float32), treat_zero_as_nodata=False),
             "ndvi_valid_pct": float(np.mean(ndvi_valid) * 100.0),
             "valid_std_pct": float(np.mean(base_std >= 0.2) * 100.0),
             "valid_stderr_pct": float(np.mean(base_stderr >= 0.2) * 100.0),

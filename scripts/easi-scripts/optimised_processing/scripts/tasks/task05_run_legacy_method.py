@@ -31,6 +31,7 @@ def run_legacy_ndvi_window(
     vi_tag: str = "vi-ndvi",
     sr_scale: float | None = None,
     no_auto_sr_scale: bool = False,
+    baseline_include_nodata: bool = False,
     output_dir: Path | None = None,
     diagnostics_dir: Path | None = None,
     home_out_dir: str | Path | None = None,
@@ -101,6 +102,8 @@ def run_legacy_ndvi_window(
         cmd.extend(["--sr-scale", str(float(sr_scale))])
     if no_auto_sr_scale:
         cmd.append("--no-auto-sr-scale")
+    if baseline_include_nodata:
+        cmd.append("--baseline-include-nodata")
 
     print("[RUN]", " ".join(cmd))
     subprocess.check_call(cmd, cwd=output_dir)
