@@ -760,16 +760,19 @@ def main(argv=None) -> int:
     # ------------------------------------------------------------------
     if args.sr_scale is not None:
         sr_scale = float(args.sr_scale)
+        sr_scale_source = "manual"
     elif args.no_auto_sr_scale:
         sr_scale = 1.0
+        sr_scale_source = "no-auto"
     else:
         sr_scale = infer_sr_scale_factor(ref_start)
+        sr_scale_source = "auto"
 
     if sr_scale <= 0:
         raise ValueError(f"Invalid --sr-scale: {sr_scale}")
 
     if args.verbose:
-        print(f"[VALIDATION] sr_scale_factor: {sr_scale} (applied as ref /= sr_scale before log1p)")
+        print(f"[VALIDATION] sr_scale_factor: {sr_scale} (source={sr_scale_source}; applied as ref /= sr_scale before log1p)")
 
     if sr_scale != 1.0:
         ref_start = (ref_start / sr_scale).astype(np.float32)
@@ -1266,6 +1269,32 @@ def main(argv=None) -> int:
 
     # ------------------ DIAGNOSTICS ------------------
     if args.diagnostics:
+        # Emit a small JSON run-metadata file so batch A/B runs can be summarised quickly.
+        # This is intentionally diagnostics-only to avoid changing core outputs.
+        import json
+
+        def _pct(arr: np.ndarray, *, treat_zero_as_nodata: bool) -> dict:
+            a = arr.astype(np.float64)
+            m = np.isfinite(a)
+            if treat_zero_as_nodata:
+                m &= (a != 0)
+            v = a[m]
+            if v.size == 0:
+                return {"count": 0}
+            p = np.percentile(v, [0, 1, 5, 50, 95, 99, 100])
+            return {
+                "count": int(v.size),
+                "mean": float(v.mean()),
+                "std": float(v.std()),
+                "min": float(p[0]),
+                "p01": float(p[1]),
+                "p05": float(p[2]),
+                "p50": float(p[3]),
+                "p95": float(p[4]),
+                "p99": float(p[5]),
+                "max": float(p[6]),
+            }
+
         diag_mask = (
             np.isfinite(ndviDiffStdErr)
             & (base_stderr >= 0.2)
@@ -1284,6 +1313,34 @@ def main(argv=None) -> int:
 
         print(f"[DIAG] Stats CSV: {stats_csv}")
         print(f"[DIAG] Bins  CSV: {bins_csv}")
+
+        uniq, cnt = np.unique(dll_class, return_counts=True)
+        dll_counts = {str(int(u)): int(c) for u, c in zip(uniq, cnt)}
+
+        runmeta = {
+            "scene": scene,
+            "tile": tile,
+            "platform": platform,
+            "start_date": sd,
+            "end_date": ed,
+            "window_start": ws,
+            "window_end": we,
+            "lookback": int(args.lookback),
+            "sr_scale_factor": float(sr_scale),
+            "sr_scale_source": sr_scale_source,
+            "ndvi_valid_pct": float(np.mean(ndvi_valid) * 100.0),
+            "valid_std_pct": float(np.mean(base_std >= 0.2) * 100.0),
+            "valid_stderr_pct": float(np.mean(base_stderr >= 0.2) * 100.0),
+            "dll_class_counts": dll_counts,
+            "spectral_index": _pct(spectral_index, treat_zero_as_nodata=True),
+            "t_test": _pct(t_test, treat_zero_as_nodata=True),
+            "s_test": _pct(s_test, treat_zero_as_nodata=True),
+            "combined_index": _pct(combined_index, treat_zero_as_nodata=True),
+            "ndviDiffStdErr": _pct(ndviDiffStdErr, treat_zero_as_nodata=False),
+        }
+        runmeta_path = _join_out(diagnostics_base, f"{diag_name}_runmeta.json")
+        _write_text_anywhere(str(runmeta_path), json.dumps(runmeta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[DIAG] Run meta JSON: {runmeta_path}")
 
         try:
             import matplotlib.pyplot as plt
