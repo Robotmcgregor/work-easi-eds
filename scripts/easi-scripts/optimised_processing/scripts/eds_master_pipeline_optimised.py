@@ -103,12 +103,19 @@ def parse_args():
         '--legacy-sr-scale',
         type=float,
         default=None,
-        help='Pass-through to legacy method: divide SR by this factor before log1p() (e.g. 10000).',
+        help=(
+            'Pass-through to legacy method: MANUAL override for SR scaling. '
+            'Divides SR bands by this factor before log1p() (e.g. 10000 for reflectance*10000). '
+            'If omitted, legacy method auto-detects scaling unless --legacy-no-auto-sr-scale is set.'
+        ),
     )
     ap.add_argument(
         '--legacy-no-auto-sr-scale',
         action='store_true',
-        help='Pass-through to legacy method: disable SR scale auto-detection.',
+        help=(
+            'Pass-through to legacy method: disable SR scale auto-detection and FORCE no scaling (sr_scale_factor=1). '
+            'Useful as a baseline/debug option.'
+        ),
     )
 
     ap.add_argument(

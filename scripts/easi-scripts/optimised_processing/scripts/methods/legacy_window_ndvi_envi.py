@@ -679,12 +679,19 @@ def main(argv=None) -> int:
         "--sr-scale",
         type=float,
         default=None,
-        help="Divide SR bands by this factor before log1p() (e.g. 10000 for reflectance*10000 products).",
+        help=(
+            "MANUAL override for SR scaling. Divides SR bands by this factor before log1p() "
+            "(e.g. 10000 for reflectance*10000 products). If omitted, scaling is auto-detected "
+            "unless --no-auto-sr-scale is set."
+        ),
     )
     ap.add_argument(
         "--no-auto-sr-scale",
         action="store_true",
-        help="Disable SR scale auto-detection (by default, auto-detects reflectance*10000 and rescales).",
+        help=(
+            "Disable SR scale auto-detection and FORCE no scaling (sr_scale_factor=1). "
+            "By default, scaling is auto-detected and reflectance*10000 products are rescaled."
+        ),
     )
 
     args = ap.parse_args(argv)
