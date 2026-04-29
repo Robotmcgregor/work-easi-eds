@@ -1357,6 +1357,8 @@ def main(argv=None) -> int:
         # Emit a small JSON run-metadata file so batch A/B runs can be summarised quickly.
         # This is intentionally diagnostics-only to avoid changing core outputs.
         import json
+        import csv
+        import io
 
         def _pct(arr: np.ndarray, *, treat_zero_as_nodata: bool) -> dict:
             a = arr.astype(np.float64)
@@ -1379,6 +1381,14 @@ def main(argv=None) -> int:
                 "p99": float(p[5]),
                 "max": float(p[6]),
             }
+
+        def _flatten_pct(prefix: str, d: dict) -> dict:
+            # stable schema for CSV concatenation
+            out = {f"{prefix}_count": int(d.get("count", 0))}
+            for k in ("mean", "std", "min", "p01", "p05", "p50", "p95", "p99", "max"):
+                v = d.get(k, None)
+                out[f"{prefix}_{k}"] = "" if v is None else float(v)
+            return out
 
         diag_mask = (
             np.isfinite(ndviDiffStdErr)
@@ -1428,6 +1438,55 @@ def main(argv=None) -> int:
         runmeta_path = _join_out(diagnostics_base, f"{diag_name}_runmeta.json")
         _write_text_anywhere(str(runmeta_path), json.dumps(runmeta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"[DIAG] Run meta JSON: {runmeta_path}")
+
+        # Also emit a one-row wide CSV for easy concatenation across tiles/runs.
+        # Keep columns stable (missing values become blank / 0).
+        known_classes = [0, 3, 10, 34, 35, 36, 37, 38, 39]
+        row = {
+            "scene": scene,
+            "tile": tile,
+            "platform": platform,
+            "start_date": sd,
+            "end_date": ed,
+            "window_start": ws,
+            "window_end": we,
+            "lookback": int(args.lookback),
+            "sr_scale_factor": float(sr_scale),
+            "sr_scale_source": sr_scale_source,
+            "baseline_include_nodata": bool(args.baseline_include_nodata),
+            "ndvi_valid_pct": float(np.mean(ndvi_valid) * 100.0),
+            "valid_std_pct": float(np.mean(base_std >= 0.2) * 100.0),
+            "valid_stderr_pct": float(np.mean(base_stderr >= 0.2) * 100.0),
+        }
+
+        # DLL counts
+        total_px = int(dll_class.size)
+        row["dll_total_px"] = total_px
+        for c in known_classes:
+            row[f"dll_count_{c}"] = int(dll_counts.get(str(c), 0))
+        row["dll_count_other"] = int(sum(v for k, v in dll_counts.items() if int(k) not in known_classes))
+
+        # Metric percentiles
+        row.update(_flatten_pct("baseline_n_valid", _pct(base_n_valid.astype(np.float32), treat_zero_as_nodata=False)))
+        row.update(_flatten_pct("spectral_index", _pct(spectral_index, treat_zero_as_nodata=True)))
+        row.update(_flatten_pct("t_test", _pct(t_test, treat_zero_as_nodata=True)))
+        row.update(_flatten_pct("s_test", _pct(s_test, treat_zero_as_nodata=True)))
+        row.update(_flatten_pct("combined_index", _pct(combined_index, treat_zero_as_nodata=True)))
+        row.update(_flatten_pct("ndviDiffStdErr", _pct(ndviDiffStdErr, treat_zero_as_nodata=False)))
+
+        # Threshold exceedance rates (handy precision/false-positive proxy)
+        v = vals.astype(np.float64)
+        v = v[np.isfinite(v)]
+        for t in (2.5, 6.0, 10.0):
+            row[f"ndviDiffStdErr_pct_ge_{str(t).replace('.', '_')}"] = float(np.mean(v >= t) * 100.0) if v.size else 0.0
+
+        csv_buf = io.StringIO()
+        writer = csv.DictWriter(csv_buf, fieldnames=list(row.keys()), extrasaction="ignore")
+        writer.writeheader()
+        writer.writerow(row)
+        summary_csv = _join_out(diagnostics_base, f"{diag_name}_summary.csv")
+        _write_text_anywhere(str(summary_csv), csv_buf.getvalue(), encoding="utf-8")
+        print(f"[DIAG] Summary CSV: {summary_csv}")
 
         try:
             import matplotlib.pyplot as plt
