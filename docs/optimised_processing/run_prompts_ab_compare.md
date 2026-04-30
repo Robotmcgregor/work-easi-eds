@@ -107,6 +107,29 @@ python "$EASI_REPO/scripts/easi-scripts/optimised_processing/scripts/eds_master_
   --run-id run-forced-10000
 ```
 
+### Variant D: LEGACY baseline stats (include nodata zeros)
+
+This flag switches the legacy baseline calculation to include nodata zeros in baseline mean/std/slope.
+Default (recommended) behavior ignores zeros (treats 0 as nodata).
+
+```bash
+python "$EASI_REPO/scripts/easi-scripts/optimised_processing/scripts/eds_master_pipeline_optimised.py" \
+  --tile p089r080 \
+  --start-date 2025-06-07 \
+  --end-date 2026-01-09 \
+  --s3-bucket "$EDS_BUCKET" \
+  --s3-prefix "$EDS_PREFIX" \
+  --work-dir "$EDS_WORK" \
+  --cloud-max 40 \
+  --lookback 10 \
+  --copy-to-home \
+  --verbose \
+  --diagnostics \
+  --dlj-troubleshoot \
+  --legacy-baseline-include-nodata \
+  --run-id run-baseline-include-nodata
+```
+
 Notes:
 - `--run-id` is an alias for `--run-tag` (they are mutually exclusive).
 - You typically do **not** need `--rebase` for A/B runs because each `--run-id` writes to a different run folder.
@@ -172,6 +195,11 @@ EDS_FORCED_10000 = EDS_BASE + """ \\
   --run-id run-forced-10000\
 """
 
+EDS_BASELINE_INCLUDE_NODATA = EDS_BASE + """ \\
+  --legacy-baseline-include-nodata \\
+  --run-id run-baseline-include-nodata\
+"""
+
 for r in df.itertuples(index=False):
     print("# ====================================================")
     print(f"# TILE: {r.tile}")
@@ -188,5 +216,8 @@ for r in df.itertuples(index=False):
 
     print("# --- Run EDS (Variant C: forced SR scale = 10000) ---")
     print(EDS_FORCED_10000.format(tile=r.tile, start=r.start, end=r.end))
+
+    print("# --- Run EDS (Variant D: baseline include nodata zeros) ---")
+    print(EDS_BASELINE_INCLUDE_NODATA.format(tile=r.tile, start=r.start, end=r.end))
     print("\n\n")
 ```
