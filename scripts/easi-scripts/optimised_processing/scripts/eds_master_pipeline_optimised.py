@@ -31,7 +31,7 @@ Local run layout:
 
 S3 layout:
     Scene-date outputs:
-        {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/...
+        {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMM}/...
     Final run outputs:
         {s3_prefix}/tiles/{tile}/outputs/{run_tag}/...
 """
@@ -51,6 +51,7 @@ from tasks.task06_convert_and_upload_outputs import convert_outputs_to_cog_and_u
 from tasks.task07_stage_ga1_locally import stage_ga1_ndvi_locally
 from tasks.task08_masks_and_vectors import make_masks_and_vectors
 from lib.s3_io import upload_file_to_s3
+from lib.dates import normalise_yyyymmdd
 
 
 def parse_args():
@@ -463,8 +464,8 @@ def main():
     print(f'[INFO] Forced SR start target_epsg: {sr_start_epsg}')
     print(f'[INFO] Forced SR end   target_epsg: {sr_end_epsg}')
 
-    eff_sd = str(sr.start_row.date)
-    eff_ed = str(sr.end_row.date)
+    eff_sd = normalise_yyyymmdd(sr.start_row.date)
+    eff_ed = normalise_yyyymmdd(sr.end_row.date)
 
     print(f"[INFO] Effective SR start: {eff_sd} (product={sr.start_row['product']}, cloud={float(sr.start_row['cloud']):.2f})")
     print(f"[INFO] Effective SR end:   {eff_ed} (product={sr.end_row['product']}, cloud={float(sr.end_row['cloud']):.2f})")
@@ -518,7 +519,7 @@ def main():
 
     required_dates = []
     for r in plan.required_rows.itertuples(index=False):
-        required_dates.append((str(r.date), str(r.platform), int(str(r.target_epsg))))
+        required_dates.append((normalise_yyyymmdd(r.date), str(r.platform), int(str(r.target_epsg))))
 
     if args.dry_run:
         print('[DRY] Skipping ga1 NDVI staging (download).')

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import math
+from datetime import date as _date, datetime
 from tasks.task01_inventory_s3 import inventory_existing_outputs
 from tasks.task02_build_scene_manifest import load_or_build_manifest
 from tasks.task03_process_scene_ndvi import process_scene_to_s3
@@ -69,6 +70,48 @@ def default_manifest_uri(bucket: str, prefix: str, tile: str) -> str:
     return f"s3://{bucket}/{prefix}/manifests/{tile}_manifest.parquet"
 
 import re
+
+
+def normalise_yyyymmdd(value) -> str:
+    """Return an 8-digit YYYYMMDD string from common date representations.
+
+    Handles:
+    - int/np.int64 like 20220101
+    - datetime/date objects
+    - strings like "20220101", "2022-01-01", "2022-01-01 00:00:00"
+    """
+    if value is None:
+        raise ValueError("date is None")
+
+    if isinstance(value, (datetime, _date)):
+        return value.strftime("%Y%m%d")
+
+    # ints (including numpy ints) -> zero-pad to 8 digits
+    if isinstance(value, int):
+        return f"{value:08d}"
+
+    # numpy scalar ints aren't instances of int on some versions
+    try:
+        if hasattr(value, "dtype") and str(getattr(value, "dtype", "")).startswith("int"):
+            return f"{int(value):08d}"
+    except Exception:
+        pass
+
+    s = str(value).strip()
+    if re.fullmatch(r"\d{8}", s):
+        return s
+
+    # common ISO-like forms
+    m = re.match(r"^(\d{4})[-/](\d{2})[-/](\d{2})", s)
+    if m:
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+
+    # last resort: pull first 8 digits if present
+    digits = re.sub(r"\D", "", s)
+    if len(digits) >= 8:
+        return digits[:8]
+
+    raise ValueError(f"Could not normalise date to YYYYMMDD from: {value!r}")
 
 
 def _extract_epsg(value) -> int | None:
@@ -190,7 +233,7 @@ def main():
 
    # 3) process each scene
     for row in manifest_df.itertuples(index=False):
-        yyyymmdd = str(row.date)
+        yyyymmdd = normalise_yyyymmdd(row.date)
         product = str(row.product)
         platform = str(row.platform)
         # target_epsg = int(row.target_epsg)
@@ -200,7 +243,8 @@ def main():
         # import sys
         # sys.exit("brek run...")
         # output keys
-        out_dir  = f"{args.s3_prefix}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymmdd}"
+        yyyymm = yyyymmdd[:6]
+        out_dir  = f"{args.s3_prefix}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymm}"
         ndvi_key = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga1-clr_e{target_epsg}.tif"
         fmk_key  = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga3_e{target_epsg}.tif"
 
