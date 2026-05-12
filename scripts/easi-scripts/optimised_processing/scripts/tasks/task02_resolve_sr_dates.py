@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+"""Task 02: choose the start/end Surface Reflectance scenes.
+
+Non-coder summary:
+- You give the pipeline a tile and a date range.
+- Landsat does not have an image for every day, and many images are too cloudy.
+- This task searches datacube for candidate SR scenes and picks:
+    - the best start scene on/before your start date
+    - the best end scene on/after your end date
+
+The result is used to build the SR composites (GA0) and to decide the effective
+dates the rest of the pipeline should use.
+"""
+
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -27,17 +40,14 @@ def resolve_sr_start_end(
     start_date: str,  # YYYY-MM-DD or YYYYMMDD
     end_date: str,
 ) -> ResolvedSR:
-    """Resolve SR "effective" start/end scenes for a tile.
+    """Return the SR scenes the pipeline will actually use.
 
-    How it works (basic idea):
-    1) query datacube for SR ARD scenes that touch the tile bbox
-    2) filter using scene cloud metadata <= cloud_max (strict)
-    3) pick:
-        - start scene = closest date on/before start_date
-        - end scene   = closest date on/after end_date
+    In plain English:
+    - We look for low-cloud SR scenes that overlap the tile.
+    - We choose the closest usable SR scene before/at start_date.
+    - We choose the closest usable SR scene after/at end_date.
 
-    This is basically what the old EDS pipeline was trying to do, just using the
-    datacube manifest style like optimised_ndvi does.
+    This makes runs repeatable and avoids using very cloudy SR scenes.
     """
     tile = tile.lower().strip()
 

@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+"""Task 09 (optional): copy key artefacts into a user-friendly folder.
+
+Non-coder summary:
+- Some environments (e.g. notebooks) have a convenient home folder like
+    `/home/jovyan`.
+- This task copies the most important run outputs (SR composites, DLL/DLJ COGs,
+    masks, vectors) into `<home_out_dir>/<run_tag>/` so you can quickly download
+    or inspect them.
+- It can also zip the folder for easy transfer.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
@@ -46,8 +57,7 @@ def copy_run_to_home(
     zip_after: bool = False,
     dry_run: bool = False,
 ) -> HomeCopyResult:
-
-    """Copy all key run artefacts into /home/jovyan for easy access."""
+    """Copy key outputs into a single run folder under `home_out_dir`."""
     home_out_dir = Path(home_out_dir)
     dest_dir = home_out_dir / run_tag
 

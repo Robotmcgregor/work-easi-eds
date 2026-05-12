@@ -1,6 +1,41 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+"""Optimised EDS processing pipeline (NDVI seasonal-window; datacube-native).
+
+This file is the *main entrypoint* people run.
+
+In plain English, it:
+1) Picks a "best" start and end Landsat SR scene for your requested dates.
+2) Builds a list of NDVI scenes in a seasonal window (baseline time-series).
+3) Ensures NDVI scenes exist in S3 (builds them if missing).
+4) Downloads NDVI scenes locally (so the legacy method can read them).
+5) Builds SR composites (GA0) for the chosen start/end dates.
+6) Runs the legacy seasonal-window change-detection method to produce DLL/DLJ.
+7) Converts outputs to GeoTIFF COGs and uploads them to S3.
+8) Creates masks + shapefiles for "strong" and "clear" detections.
+
+Key idea: everything is written into a *run-scoped folder* so repeated runs don't
+overwrite each other (see --run-tag/--run-id).
+
+Local run layout:
+    <work-dir>/<tile>/<run-tag>/
+        ndvi_work/       # scratch space for building NDVI scenes
+        ga1_stage/       # local downloaded NDVI COGs
+        ga0_work/        # scratch space for SR composites
+        legacy_outputs/  # DLL/DLJ outputs produced by the legacy method
+        outputs_cog/     # converted COG outputs ready for upload
+        maskvec_work/    # masks + vectors created from DLJ
+        diagnostics/     # optional stats CSVs/JSONs/plots
+        sr_raw_cog/      # optional export of raw SR composites
+
+S3 layout:
+    Scene-date outputs:
+        {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/...
+    Final run outputs:
+        {s3_prefix}/tiles/{tile}/outputs/{run_tag}/...
+"""
+
 import argparse
 from dataclasses import dataclass
 import math
@@ -17,31 +52,16 @@ from tasks.task07_stage_ga1_locally import stage_ga1_ndvi_locally
 from tasks.task08_masks_and_vectors import make_masks_and_vectors
 
 
-"""Optimised EDS processing pipeline (NDVI seasonal-window; datacube-native).
-
-This pipeline keeps the existing scientific workflow but writes all local and S3
-artifacts into a single run-scoped layout.
-
-Local run layout:
-  <work-dir>/<tile>/<run-tag>/
-    ndvi_work/
-    ga1_stage/
-    ga0_work/
-    legacy_outputs/
-    outputs_cog/
-    maskvec_work/
-    diagnostics/
-    sr_raw_cog/          # optional
-
-S3 layout:
-  Scene-date outputs:
-    {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/...
-  Final run outputs:
-    {s3_prefix}/tiles/{tile}/outputs/{run_tag}/...
-"""
-
-
 def parse_args():
+    """Parse command-line arguments.
+
+    These flags are grouped roughly as:
+    - What to process: tile, start/end date
+    - Where data lives: S3 bucket/prefix and local work directory
+    - Data quality controls: cloud-max
+    - A/B testing knobs for the legacy method: SR scaling + baseline stats mode
+    - Debugging outputs: --verbose, --diagnostics, --stop-after-dlj
+    """
     ap = argparse.ArgumentParser('Optimised EDS processing (NDVI seasonal window)')
 
     ap.add_argument('--tile', required=True, help='e.g. p115r078')
@@ -71,11 +91,61 @@ def parse_args():
     ap.add_argument('--diagnostics', action='store_true')
     ap.add_argument('--verbose', action='store_true')
 
-    ap.add_argument('--run-tag', default=None, help='Optional run tag for output folder (default: tile_d<start><end>)')
+    ap.add_argument(
+        '--dlj-troubleshoot',
+        action='store_true',
+        help='After DLJ is produced, print per-band pixel stats (and band descriptions).',
+    )
+    ap.add_argument(
+        '--stop-after-dlj',
+        action='store_true',
+        help='Exit immediately after DLJ is produced (for debugging/inspection).',
+    )
+
+    run_group = ap.add_mutually_exclusive_group()
+    run_group.add_argument(
+        '--run-tag',
+        default=None,
+        help='Optional run tag for output folder (default: tile_d<start><end>)',
+    )
+    run_group.add_argument(
+        '--run-id',
+        default=None,
+        help='Alias for --run-tag (e.g. run1, run2). Useful for separating repeated runs.',
+    )
 
     ap.add_argument('--strong-threshold', type=int, default=60)
     ap.add_argument('--clear-threshold', type=int, default=80)
     ap.add_argument('--min-area-ha', type=float, default=10.0)
+
+    # Legacy-method controls (for A/B comparisons)
+    ap.add_argument(
+        '--legacy-sr-scale',
+        type=float,
+        default=None,
+        help=(
+            'Pass-through to legacy method: MANUAL override for SR scaling. '
+            'Divides SR bands by this factor before log1p() (e.g. 10000 for reflectance*10000). '
+            'If omitted, legacy method auto-detects scaling unless --legacy-no-auto-sr-scale is set.'
+        ),
+    )
+    ap.add_argument(
+        '--legacy-no-auto-sr-scale',
+        action='store_true',
+        help=(
+            'Pass-through to legacy method: disable SR scale auto-detection and FORCE no scaling (sr_scale_factor=1). '
+            'Useful as a baseline/debug option.'
+        ),
+    )
+
+    ap.add_argument(
+        '--legacy-baseline-include-nodata',
+        action='store_true',
+        help=(
+            'Pass-through to legacy method: use LEGACY baseline stats (include nodata zeros in baseline mean/std/slope). '
+            'Default (recommended) ignores zeros (treats 0 as nodata).'
+        ),
+    )
 
     ap.add_argument(
         '--copy-to-home',
@@ -107,8 +177,87 @@ def parse_args():
     return ap.parse_args()
 
 
+def _print_raster_stats(path: Path, label: str) -> None:
+    """Print lightweight stats for a raster (intended for DLJ/DLL debugging)."""
+    try:
+        import numpy as np  # type: ignore[import-not-found]
+        import rasterio  # type: ignore[import-not-found]
+    except Exception as e:
+        print(f"[DLJ-DBG] Cannot import rasterio/numpy for stats: {e}")
+        return
+
+    path = Path(path)
+    if not path.exists():
+        print(f"[DLJ-DBG] Missing raster for stats: {path}")
+        return
+
+    with rasterio.open(path) as ds:
+        print(f"[DLJ-DBG] {label}: {path}")
+        print(f"[DLJ-DBG]  driver={ds.driver} size={ds.width}x{ds.height} count={ds.count} dtype={ds.dtypes}")
+        print(f"[DLJ-DBG]  nodata={ds.nodata} crs={ds.crs}")
+        try:
+            print(f"[DLJ-DBG]  descriptions={ds.descriptions}")
+        except Exception:
+            pass
+
+        for b in range(1, ds.count + 1):
+            arr = ds.read(b)
+            nodata = ds.nodata
+            if nodata is None:
+                # For these outputs, 0 is the implicit nodata.
+                nodata = 0
+            mask = arr != nodata
+            total = arr.size
+            valid = int(mask.sum())
+            if valid == 0:
+                print(f"[DLJ-DBG]  band{b}: valid=0/{total} (all nodata={nodata})")
+                continue
+            v = arr[mask].astype(np.float64)
+            print(
+                f"[DLJ-DBG]  band{b}: valid={valid}/{total} "
+                f"min={v.min():.3f} max={v.max():.3f} mean={v.mean():.3f} std={v.std():.3f}"
+            )
+            # Quick signal: how much is just zeros?
+            z = int((arr == 0).sum())
+            print(f"[DLJ-DBG]   zeros={z}/{total}")
+
+
+def _dlj_has_any_valid_pixels(path: Path) -> bool:
+    """Return True if a raster has any non-nodata pixel in any band.
+
+    For these products, nodata is typically encoded as 0.
+    """
+    try:
+        import numpy as np  # type: ignore[import-not-found]
+        import rasterio  # type: ignore[import-not-found]
+    except Exception:
+        # If we can't import, don't hard-fail the pipeline.
+        return True
+
+    path = Path(path)
+    if not path.exists():
+        return False
+
+    with rasterio.open(path) as ds:
+        nodata = ds.nodata
+        if nodata is None:
+            nodata = 0
+        for b in range(1, ds.count + 1):
+            arr = ds.read(b)
+            if int(np.count_nonzero(arr != nodata)) > 0:
+                return True
+    return False
+
+
 @dataclass(frozen=True)
 class RunPaths:
+    """All folders used for a single run.
+
+    A *run* is identified by tile + run_tag.
+    Keeping run folders separate makes it easy to:
+    - run the same tile multiple times without overwriting outputs
+    - compare different settings (e.g. SR scaling) side-by-side
+    """
     run_root: Path
     ndvi_work: Path
     ga1_stage: Path
@@ -153,6 +302,7 @@ class RunPaths:
 
 
 def _copy_run_artifact(src: Path, dst_dir: Path) -> Path:
+    """Copy a file into a run folder (used for optional exports)."""
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / src.name
     if src.resolve() != dst.resolve():
@@ -161,11 +311,17 @@ def _copy_run_artifact(src: Path, dst_dir: Path) -> Path:
 
 
 def _norm_yyyymmdd(iso: str) -> str:
+    """Convert YYYY-MM-DD into YYYYMMDD (the pipeline's internal date format)."""
     y, m, d = iso.split('-')
     return f'{y}{m}{d}'
 
 
 def _extract_epsg(value) -> int | None:
+    """Try to pull an EPSG code out of a variety of values.
+
+    This exists because some inputs come from shapefiles/metadata where CRS may be
+    stored as an int, a string like "EPSG:32756", or embedded in WKT.
+    """
     if value is None:
         return None
 
@@ -191,6 +347,7 @@ def _extract_epsg(value) -> int | None:
 
 
 def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
+    """Given a lon/lat point, return the WGS84 UTM EPSG code for that location."""
     zone = int(math.floor((lon + 180.0) / 6.0) + 1)
     if lat >= 0:
         return 32600 + zone
@@ -198,11 +355,12 @@ def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
 
 
 def resolve_output_epsg_from_row(row, cli_target_epsg: int) -> int:
-    """
-    Priority:
-      1. explicit CLI override
-      2. derive WGS84 UTM from bbox centre
-      3. fallback to existing EPSG-like fields if bbox missing
+    """Choose the output CRS (EPSG code) for a scene.
+
+    Priority order:
+    1) If the user provided --target-epsg, use it.
+    2) Otherwise, derive WGS84 UTM from the scene bbox centre.
+    3) If bbox is missing, try to fall back to any EPSG-like field present.
     """
     if cli_target_epsg and int(cli_target_epsg) > 0:
         return int(cli_target_epsg)
@@ -236,12 +394,13 @@ def resolve_output_epsg_from_row(row, cli_target_epsg: int) -> int:
 
 
 def main():
+    """Run the pipeline end-to-end for one tile and one start/end date pair."""
     args = parse_args()
     tile = args.tile.lower().strip()
 
     sd = _norm_yyyymmdd(args.start_date)
     ed = _norm_yyyymmdd(args.end_date)
-    run_tag = args.run_tag or f'{tile}_d{sd}{ed}'
+    run_tag = args.run_tag or args.run_id or f'{tile}_d{sd}{ed}'
 
     paths = RunPaths.from_args(args, tile=tile, run_tag=run_tag)
     paths.ensure_directories(include_sr_raw_cog=bool(args.export_sr_raw_cog))
@@ -249,6 +408,11 @@ def main():
     print(f'[INFO] Local run root: {paths.run_root}')
     print(f"[INFO] Run outputs S3 prefix: {args.s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}")
 
+    # ------------------------------------------------------------------
+    # STEP 1: Pick the best SR start/end scenes.
+    # We may not get the exact dates requested: the resolver picks the closest
+    # acceptable (low cloud) scene around your requested start/end.
+    # ------------------------------------------------------------------
     sr = resolve_sr_start_end(
         tile=tile,
         tile_shp=args.tile_shp,
@@ -273,6 +437,10 @@ def main():
     print(f"[INFO] Effective SR start: {eff_sd} (product={sr.start_row['product']}, cloud={float(sr.start_row['cloud']):.2f})")
     print(f"[INFO] Effective SR end:   {eff_ed} (product={sr.end_row['product']}, cloud={float(sr.end_row['cloud']):.2f})")
 
+    # ------------------------------------------------------------------
+    # STEP 2: Build the seasonal NDVI baseline plan.
+    # This is the list of NDVI scenes we want to use as the baseline time-series.
+    # ------------------------------------------------------------------
     plan = build_seasonal_ndvi_plan(
         tile=tile,
         tile_shp=args.tile_shp,
@@ -299,6 +467,10 @@ def main():
     print(f'[INFO] Seasonal window: {plan.window.window_start_mmdd} -> {plan.window.window_end_mmdd} (months {plan.window.months_hint()})')
     print(f'[INFO] NDVI scenes in seasonal plan: {len(plan.required_rows)}')
 
+    # ------------------------------------------------------------------
+    # STEP 3: Ensure required NDVI scenes exist in S3.
+    # If a required NDVI scene is missing (or --rebase is set), it is computed.
+    # ------------------------------------------------------------------
     ensure_seasonal_ndvi_in_s3(
         plan=plan,
         tile=tile,
@@ -322,6 +494,10 @@ def main():
         print('[DRY] Skipping legacy method run + output conversion.')
         return
 
+    # ------------------------------------------------------------------
+    # STEP 4: Download (stage) NDVI scenes locally.
+    # The legacy method expects local file paths.
+    # ------------------------------------------------------------------
     ga1_dir = stage_ga1_ndvi_locally(
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
@@ -331,6 +507,10 @@ def main():
         dry_run=bool(args.dry_run),
     )
 
+    # ------------------------------------------------------------------
+    # STEP 5: Build SR composites (GA0) for start and end.
+    # These are 6-band stacks used by the legacy spectral index.
+    # ------------------------------------------------------------------
     ga0_start = build_ga0_sr_to_s3(
         tile=tile,
         date=eff_sd,
@@ -385,6 +565,12 @@ def main():
     print(f'[INFO] Using start db8 masked stack: {ga0_start.local_clr_path}')
     print(f'[INFO] Using end   db8 masked stack: {ga0_end.local_clr_path}')
 
+    # ------------------------------------------------------------------
+    # STEP 6: Run the legacy seasonal-window change detection method.
+    # This produces:
+    # - DLL: change "class" raster (integers like 10, 34..39)
+    # - DLJ: interpretation raster (multiple bands including clearing probability)
+    # ------------------------------------------------------------------
     outputs = run_legacy_ndvi_window(
         methods_dir=Path(__file__).parent / 'methods',
         scene=tile,
@@ -399,15 +585,51 @@ def main():
         diagnostics=bool(args.diagnostics),
         verbose=bool(args.verbose),
         vi_tag='vi-ndvi',
+        sr_scale=args.legacy_sr_scale,
+        no_auto_sr_scale=bool(args.legacy_no_auto_sr_scale),
+        baseline_include_nodata=bool(args.legacy_baseline_include_nodata),
         output_dir=paths.legacy_outputs,
         diagnostics_dir=paths.diagnostics,
     )
 
+    print(f"[INFO] Legacy outputs dir: {paths.legacy_outputs}")
+    print(f"[INFO] Legacy DLL (change class): {outputs.dll_img}")
+    print(f"[INFO] Legacy DLJ (interpretation): {outputs.dlj_img}")
+
+    # COG outputs use platform-prefixed naming so ArcGIS + downstream tooling can
+    # relate them back to the GA0 platform (e.g. sl8/sl9).
+    target_epsg = int(sr.end_row['target_epsg'])
+    platform = str(sr.end_row['platform']).lower().strip()  # e.g. 'sl8'
+    platform_prefix = f"{platform}olre"
+    cog_dll_name = Path(
+        f"{platform_prefix}_{tile}_d{eff_sd}{eff_ed}_dll_e{target_epsg}.tif"
+    )
+    cog_dlj_name = Path(
+        f"{platform_prefix}_{tile}_d{eff_sd}{eff_ed}_dlj_e{target_epsg}.tif"
+    )
+    print(f"[INFO] COG DLL target name: {cog_dll_name.name}")
+    print(f"[INFO] COG DLJ target name: {cog_dlj_name.name}")
+
+    if bool(args.dlj_troubleshoot) or bool(args.stop_after_dlj):
+        print("\n[DLJ-DBG] Legacy method outputs produced; dumping stats (legacy filenames)")
+        print(f"[DLJ-DBG]  legacy DLL name: {Path(outputs.dll_img).name}")
+        print(f"[DLJ-DBG]  legacy DLJ name: {Path(outputs.dlj_img).name}")
+        _print_raster_stats(Path(outputs.dll_img), label="DLL legacy")
+        _print_raster_stats(Path(outputs.dlj_img), label="DLJ legacy")
+        print("[DLJ-DBG] End legacy stats\n")
+
+        if bool(args.stop_after_dlj):
+            raise SystemExit("dlj failure")
+
+    # ------------------------------------------------------------------
+    # STEP 7: Convert outputs to Cloud Optimised GeoTIFFs (COGs) and upload.
+    # COGs are easier to use in GIS tools and faster to read from cloud storage.
+    # ------------------------------------------------------------------
     converted = convert_outputs_to_cog_and_upload(
         dll_src_img=outputs.dll_img,
         dlj_src_img=outputs.dlj_img,
-        dll_final_name=outputs.dll_img,
-        dlj_final_name=outputs.dlj_img,
+        dll_final_name=cog_dll_name,
+        dlj_final_name=cog_dlj_name,
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
         tile=tile,
@@ -415,11 +637,25 @@ def main():
         work_dir=paths.outputs_cog,
     )
 
+    if bool(args.dlj_troubleshoot):
+        print("\n[DLJ-DBG] Converted COG outputs produced; dumping stats (final filenames)")
+        print(f"[DLJ-DBG]  expected COG DLL name: {cog_dll_name.name}")
+        print(f"[DLJ-DBG]  expected COG DLJ name: {cog_dlj_name.name}")
+        print(f"[DLJ-DBG]  actual   COG DLL name: {Path(converted.dllmz_cog_local).name}")
+        print(f"[DLJ-DBG]  actual   COG DLJ name: {Path(converted.dljmz_cog_local).name}")
+        _print_raster_stats(Path(converted.dllmz_cog_local), label="DLL COG final")
+        _print_raster_stats(Path(converted.dljmz_cog_local), label="DLJ COG final")
+        print("[DLJ-DBG] End COG stats\n")
+
     dljmz_cog_local = Path(converted.dljmz_cog_local)
 
     for u in converted.uploaded:
         print('[OK]', u.s3_uri)
 
+    # ------------------------------------------------------------------
+    # STEP 8: Create masks + shapefiles.
+    # These are the outputs most people use for area summaries and QA.
+    # ------------------------------------------------------------------
     mv = make_masks_and_vectors(
         dljmz_cog_local=dljmz_cog_local,
         bucket=args.s3_bucket,
@@ -458,7 +694,7 @@ def main():
             paths.maskvec_work / 'vectors' / 'clear',
         ]
 
-        copy_run_to_home(
+        home_copy = copy_run_to_home(
             run_tag=run_tag,
             home_out_dir=Path(args.home_out_dir),
             ga0_start_raw_local=Path(ga0_start.local_raw_path),
@@ -472,6 +708,31 @@ def main():
             zip_after=bool(args.zip_home),
             dry_run=bool(args.dry_run),
         )
+
+        if bool(args.dlj_troubleshoot) and (not bool(args.dry_run)):
+            # Re-open the *home-copied* DLJ products and dump stats so ArcGIS users
+            # can trust the artefacts they download.
+            try:
+                copied_tifs = [
+                    p for p in home_copy.copied
+                    if p.suffix.lower() in {'.tif', '.tiff'}
+                    and p.parent.name in {'legacy_outputs', 'cog_outputs'}
+                    and 'dlj' in p.name.lower()
+                ]
+                if copied_tifs:
+                    print("\n[DLJ-DBG] Home-copied DLJ products; dumping stats + checks")
+                    any_fail = False
+                    for p in copied_tifs:
+                        _print_raster_stats(Path(p), label=f"HOME {p.parent.name} {p.name}")
+                        ok = _dlj_has_any_valid_pixels(Path(p))
+                        print(f"[DLJ-CHECK] {p.name}: {'PASS' if ok else 'FAIL (all nodata/zeros)'}")
+                        any_fail = any_fail or (not ok)
+                    print("[DLJ-DBG] End home DLJ checks\n")
+
+                    if any_fail:
+                        raise SystemExit("dlj failure")
+            except Exception as e:
+                print(f"[WARN] Failed to read stats for home-copied COGs: {e}")
 
     print('[DONE] Optimised EDS processing complete.')
 

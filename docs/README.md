@@ -35,6 +35,12 @@ logs/              # Application logs
 - **Dashboard Interface**: Visual monitoring and control interface
 - **Database Integration**: PostgreSQL for persistent data storage
 
+## Optimised processing (tile runs)
+
+If you're running the newer run-scoped tile pipeline (the one that produces DLL/DLJ, masks, vectors, and per-run diagnostics), start here:
+
+- `docs/optimised_processing/README.md`
+
 ## Quick Start
 
 1. Install dependencies:

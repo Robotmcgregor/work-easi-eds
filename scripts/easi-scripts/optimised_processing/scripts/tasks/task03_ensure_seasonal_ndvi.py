@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+"""Task 03: build the NDVI "seasonal baseline" plan and ensure NDVI exists.
+
+Non-coder summary:
+- The legacy method needs a history of NDVI images (the baseline time-series).
+- We define a seasonal window (e.g. roughly winter months) so we compare like
+    with like (reduces seasonal effects).
+- We then ensure all required NDVI scenes are available in S3.
+    If a scene is missing, we compute it and upload it.
+
+Outputs:
+- A plan listing the dates/platforms/products we want.
+- NDVI rasters stored in S3 under the canonical tile/date layout.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
@@ -31,6 +45,11 @@ def build_seasonal_ndvi_plan(
     lookback_years: int,
     target_epsg: int = 0,
 ) -> SeasonalNDVIPlan:
+    """Create the list of NDVI scenes that will be used as the baseline.
+
+    We choose scenes in a seasonal window for multiple years (lookback_years)
+    leading up to the effective end date.
+    """
     tile = tile.lower().strip()
 
     lon_min, lat_min, lon_max, lat_max = load_tile_bbox_wgs84(tile_shp=tile_shp, tile=tile)
@@ -103,11 +122,13 @@ def ensure_seasonal_ndvi_in_s3(
     dry_run: bool,
     dask_chunk: int = 2048,
 ) -> None:
-    """Ensure all NDVI outputs required by the seasonal plan exist in S3.
+    """Make sure every NDVI scene in the plan exists in S3.
 
-        Canonical output layout:
-            {prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga1-clr_e{epsg}.tif
-            {prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga2_e{epsg}.tif
+    If a required NDVI file is missing (or rebase=True), we compute it.
+
+    Canonical output layout:
+      {prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga1-clr_e{epsg}.tif
+      {prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga2_e{epsg}.tif
     """
     tile = tile.lower().strip()
     work_dir = Path(work_dir)

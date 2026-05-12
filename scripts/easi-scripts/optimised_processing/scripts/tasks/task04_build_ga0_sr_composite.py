@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+"""Task 04: build GA0 SR composites (6-band Surface Reflectance stacks).
+
+Non-coder summary:
+- GA0 is a 6-band image (blue/green/red/nir/swir1/swir2) for one date.
+- The pipeline builds two GA0 files: one for the chosen start date and one for
+    the chosen end date.
+- These are used by the legacy method's "spectral index" (a weighted log
+    calculation).
+
+This task writes two versions:
+- RAW: unmasked SR composite
+- CLR: cloud-masked SR composite (the one we typically use downstream)
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,13 +72,13 @@ def build_ga0_sr_to_s3(
     rebase: bool = False,
     dry_run: bool = False,
 ) -> ga0Output:
-    """Create a 6-band SR stack ("ga0") for one scene date and upload it to S3.
+    """Create GA0 (SR composite) for one date and upload it to S3.
 
-        Local temporary and final files stay under the supplied work_dir.
+    Local temporary and final files stay under the supplied work_dir.
 
-        S3 output layout:
-            {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga0_e{epsg}.tif
-            {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga0-clr_e{epsg}.tif
+    S3 output layout:
+      {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga0_e{epsg}.tif
+      {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga0-clr_e{epsg}.tif
     """
     import datacube
     import re
@@ -284,7 +298,7 @@ def build_ga0_sr_to_s3(
     #         PLATFORM=platform,
     #         CLOUD_MAX=str(cloud_max),
     #     )
-    with rasterio.open(local_raw_tif, "w", **profile) as dst:
+    with rasterio.open(str(local_raw_tif), "w", **profile) as dst:
         dst.write(stack_raw)
         dst.update_tags(
             SOFTWARE="optimised_processing",
@@ -294,7 +308,7 @@ def build_ga0_sr_to_s3(
             MASK_STATE="none",
         )
 
-    with rasterio.open(local_clr_tif, "w", **profile) as dst:
+    with rasterio.open(str(local_clr_tif), "w", **profile) as dst:
         dst.write(stack_clr)
         dst.update_tags(
             SOFTWARE="optimised_processing",
@@ -303,6 +317,11 @@ def build_ga0_sr_to_s3(
             CLOUD_MAX=str(cloud_max),
             MASK_STATE="clr",
         )
+
+    if not local_raw_tif.exists():
+        raise RuntimeError(f"Expected GA0 raw temp tif was not created: {local_raw_tif}")
+    if not local_clr_tif.exists():
+        raise RuntimeError(f"Expected GA0 clr temp tif was not created: {local_clr_tif}")
     # Convert to COG (keeps values identical; adds overviews)
     to_cog(str(local_raw_tif), str(local_raw_cog), overwrite=True)
     to_cog(str(local_clr_tif), str(local_clr_cog), overwrite=True)
