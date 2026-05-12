@@ -20,6 +20,7 @@ These templates use the following placeholders:
   - can be overridden with `--run-tag` / `--run-id`
 - `{start_yyyymmdd}`, `{end_yyyymmdd}`: effective SR dates chosen by the pipeline (format `YYYYMMDD`)
 - `{yyyymmdd}`: a scene date in `YYYYMMDD`
+- `{yyyymm}`: month bucket derived from `{yyyymmdd}` (format `YYYYMM`)
 - `{epsg}`: output EPSG code used in filenames
 - `{platform}`: `sl8`, `sl9`, etc.
 - `{s3_bucket}`, `{s3_prefix}`: S3 destination configured on the CLI
@@ -68,9 +69,9 @@ These are *canonical per-date* outputs. They are created if missing (or if `--re
 
 S3 keys:
 
-- `{s3_prefix}/tiles/{tile}/{YYYY}/{yyyymmdd}/{platform}olre_{tile}_{yyyymmdd}_ga1-clr_e{epsg}.tif`
+- `{s3_prefix}/tiles/{tile}/{YYYY}/{yyyymm}/{platform}olre_{tile}_{yyyymmdd}_ga1-clr_e{epsg}.tif`
   - NDVI (float32 COG), masked to clear land, NoData = `-9999`
-- `{s3_prefix}/tiles/{tile}/{YYYY}/{yyyymmdd}/{platform}olre_{tile}_{yyyymmdd}_ga2_e{epsg}.tif`
+- `{s3_prefix}/tiles/{tile}/{YYYY}/{yyyymm}/{platform}olre_{tile}_{yyyymmdd}_ga2_e{epsg}.tif`
   - “ffmask” / keep-mask (uint8 COG), NoData = `0`
 
 Local scratch during creation (usually **deleted** after upload unless `rebase=True` in the NDVI task):
@@ -92,9 +93,9 @@ These are per-date SR composites in S3 and local copies for the run.
 
 S3 keys:
 
-- `{s3_prefix}/tiles/{tile}/{YYYY}/{yyyymmdd}/{platform}olre_{tile}_{yyyymmdd}_ga0_e{epsg}.tif`
+- `{s3_prefix}/tiles/{tile}/{YYYY}/{yyyymm}/{platform}olre_{tile}_{yyyymmdd}_ga0_e{epsg}.tif`
   - RAW (unmasked) SR composite (float32 COG)
-- `{s3_prefix}/tiles/{tile}/{YYYY}/{yyyymmdd}/{platform}olre_{tile}_{yyyymmdd}_ga0-clr_e{epsg}.tif`
+- `{s3_prefix}/tiles/{tile}/{YYYY}/{yyyymm}/{platform}olre_{tile}_{yyyymmdd}_ga0-clr_e{epsg}.tif`
   - CLR (cloud/land-clear masked) SR composite (float32 COG), NoData = `-9999`
 
 Local files (kept) under:

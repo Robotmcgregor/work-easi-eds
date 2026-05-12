@@ -20,7 +20,7 @@ from typing import List
 
 import pandas as pd
 
-from lib.dates import SeasonalWindow
+from lib.dates import SeasonalWindow, normalise_yyyymmdd
 from lib.tile_grid import load_tile_bbox_wgs84, derive_target_epsg_gda94_mga_from_lon
 from lib.datacube_manifest import build_scene_manifest_from_datacube_bbox
 from lib.s3_io import s3_key_exists
@@ -126,21 +126,22 @@ def ensure_seasonal_ndvi_in_s3(
 
     If a required NDVI file is missing (or rebase=True), we compute it.
 
-    Canonical output layout:
-      {prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga1-clr_e{epsg}.tif
-      {prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga2_e{epsg}.tif
+        Canonical output layout:
+            {prefix}/tiles/{tile}/{YYYY}/{YYYYMM}/slXolre_{tile}_{YYYYMMDD}_ga1-clr_e{epsg}.tif
+            {prefix}/tiles/{tile}/{YYYY}/{YYYYMM}/slXolre_{tile}_{YYYYMMDD}_ga2_e{epsg}.tif
     """
     tile = tile.lower().strip()
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
     for row in plan.required_rows.itertuples(index=False):
-        yyyymmdd = str(row.date)
+        yyyymmdd = normalise_yyyymmdd(row.date)
+        yyyymm = yyyymmdd[:6]
         platform = str(row.platform)
         product = str(row.product)
         target_epsg = int(row.target_epsg)
 
-        out_dir = f"{prefix.rstrip('/')}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymmdd}"
+        out_dir = f"{prefix.rstrip('/')}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymm}"
         ndvi_key = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga1-clr_e{target_epsg}.tif"
         fmk_key = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga2_e{target_epsg}.tif"
 

@@ -21,6 +21,7 @@ import numpy as np
 
 from lib.s3_io import s3_key_exists, upload_file_to_s3
 from lib.cog import to_cog
+from lib.dates import normalise_yyyymmdd
 
 
 SR_BANDS = [
@@ -76,9 +77,9 @@ def build_ga0_sr_to_s3(
 
     Local temporary and final files stay under the supplied work_dir.
 
-    S3 output layout:
-      {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga0_e{epsg}.tif
-      {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMMDD}/slXolre_{tile}_{YYYYMMDD}_ga0-clr_e{epsg}.tif
+        S3 output layout:
+            {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMM}/slXolre_{tile}_{YYYYMMDD}_ga0_e{epsg}.tif
+            {s3_prefix}/tiles/{tile}/{YYYY}/{YYYYMM}/slXolre_{tile}_{YYYYMMDD}_ga0-clr_e{epsg}.tif
     """
     import datacube
     import re
@@ -90,6 +91,8 @@ def build_ga0_sr_to_s3(
 
 
     tile = tile.lower().strip()
+    date = normalise_yyyymmdd(date)
+    yyyymm = date[:6]
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -102,7 +105,7 @@ def build_ga0_sr_to_s3(
     fname_raw = f"sl{platform[1:]}olre_{tile}_{date}_ga0_e{int(target_epsg)}.tif"
     fname_clr = f"sl{platform[1:]}olre_{tile}_{date}_ga0-clr_e{int(target_epsg)}.tif"
 
-    out_dir = f"{s3_prefix.rstrip('/')}/tiles/{tile}/{date[:4]}/{date}"
+    out_dir = f"{s3_prefix.rstrip('/')}/tiles/{tile}/{date[:4]}/{yyyymm}"
 
     raw_key = f"{out_dir}/{fname_raw}"
     clr_key = f"{out_dir}/{fname_clr}"
