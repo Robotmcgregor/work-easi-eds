@@ -300,6 +300,11 @@ def build_ga0_sr_to_s3(
     #     )
     with rasterio.open(str(local_raw_tif), "w", **profile) as dst:
         dst.write(stack_raw)
+        for i, name in enumerate(SR_BANDS, start=1):
+            try:
+                dst.set_band_description(i, name)
+            except Exception:
+                pass
         dst.update_tags(
             SOFTWARE="optimised_processing",
             PRODUCT=product,
@@ -310,6 +315,11 @@ def build_ga0_sr_to_s3(
 
     with rasterio.open(str(local_clr_tif), "w", **profile) as dst:
         dst.write(stack_clr)
+        for i, name in enumerate(SR_BANDS, start=1):
+            try:
+                dst.set_band_description(i, name)
+            except Exception:
+                pass
         dst.update_tags(
             SOFTWARE="optimised_processing",
             PRODUCT=product,

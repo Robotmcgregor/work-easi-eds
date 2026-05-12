@@ -13,6 +13,7 @@ These docs describe the pipeline under `scripts/easi-scripts/optimised_processin
 - [DLL/DLJ outputs (formats, naming, derivation)](outputs_dll_dlj.md)
 - [DLJ bands reference (what each band means)](dlj_bands.md)
 - [Clearing probability thresholds (strong/clear)](clearing_probability_thresholds.md)
+- [Output locations (normal vs --diagnostics)](output_locations.md)
 - [Troubleshooting & diagnostics](troubleshooting.md)
 
 ## Note on “legacy” flags
