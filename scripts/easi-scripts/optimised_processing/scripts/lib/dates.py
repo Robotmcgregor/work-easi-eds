@@ -1,8 +1,48 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date as _date, datetime
+import re
 from dateutil.relativedelta import relativedelta
+
+
+def normalise_yyyymmdd(value) -> str:
+    """Return an 8-digit YYYYMMDD string from common date representations.
+
+    Accepts:
+    - int/np.int64 like 20220101
+    - datetime/date
+    - strings like "20220101", "2022-01-01", "2022-01-01 00:00:00"
+    """
+    if value is None:
+        raise ValueError("date is None")
+
+    if isinstance(value, (datetime, _date)):
+        return value.strftime('%Y%m%d')
+
+    if isinstance(value, int):
+        return f"{value:08d}"
+
+    # numpy scalar ints aren't instances of int on some versions
+    try:
+        if hasattr(value, 'dtype') and str(getattr(value, 'dtype', '')).startswith('int'):
+            return f"{int(value):08d}"
+    except Exception:
+        pass
+
+    s = str(value).strip()
+    if re.fullmatch(r"\d{8}", s):
+        return s
+
+    m = re.match(r"^(\d{4})[-/](\d{2})[-/](\d{2})", s)
+    if m:
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+
+    digits = re.sub(r"\D", "", s)
+    if len(digits) >= 8:
+        return digits[:8]
+
+    raise ValueError(f"Could not normalise date to YYYYMMDD from: {value!r}")
 
 
 def yyyymmdd_to_date(d: str) -> datetime:

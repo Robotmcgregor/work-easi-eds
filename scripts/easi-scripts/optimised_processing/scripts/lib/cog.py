@@ -98,6 +98,27 @@ def to_cog(src_path: str, dst_path: str, overwrite: bool = False) -> None:
 
     with rasterio.open(src_path) as src:
         profile = src.profile.copy()
+
+        src_descriptions = None
+        try:
+            src_descriptions = tuple(getattr(src, "descriptions", None) or [])
+        except Exception:
+            src_descriptions = None
+
+        # Preserve nodata explicitly for compatibility (some writers/copy paths
+        # can drop it, which causes ArcGIS to treat fill values as real data).
+        nodata = src.nodata
+        if nodata is None:
+            try:
+                nds = list(getattr(src, "nodatavals", []) or [])
+                nds = [v for v in nds if v is not None]
+                if nds and all(v == nds[0] for v in nds):
+                    nodata = nds[0]
+            except Exception:
+                nodata = None
+        if nodata is not None:
+            profile["nodata"] = nodata
+
         dtype_str = str(profile.get('dtype', '')).lower()
         is_float = dtype_str.startswith('float')
         # NOTE: Some GIS tools (notably ArcGIS) can behave poorly with
@@ -121,6 +142,29 @@ def to_cog(src_path: str, dst_path: str, overwrite: bool = False) -> None:
 
     # add overviews
     with rasterio.open(dst_path, 'r+') as dst:
+        # Re-apply nodata after copy for maximum compatibility.
+        # (Some GIS tools only recognize nodata if it exists on the written bands.)
+        if profile.get("nodata", None) is not None:
+            try:
+                dst.nodata = profile["nodata"]
+            except Exception:
+                pass
+            try:
+                # If the driver exposes per-band nodata, set them uniformly.
+                dst.nodatavals = tuple([profile["nodata"]] * int(dst.count))  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+        # Re-apply band descriptions for GIS friendliness.
+        if src_descriptions:
+            try:
+                for i in range(1, int(dst.count) + 1):
+                    desc = src_descriptions[i - 1] if (i - 1) < len(src_descriptions) else None
+                    if desc:
+                        dst.set_band_description(i, str(desc))
+            except Exception:
+                pass
+
         factors = [2, 4, 8, 16]
         dst.build_overviews(factors, Resampling.nearest)
         dst.update_tags(ns='rio_overview', resampling='nearest')

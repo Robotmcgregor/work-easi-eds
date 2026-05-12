@@ -11,6 +11,7 @@ Non-coder summary:
 from pathlib import Path
 
 from lib.s3_io import download_s3_uri, s3_key_exists
+from lib.dates import normalise_yyyymmdd
 
 
 def stage_ga1_ndvi_locally(
@@ -37,6 +38,8 @@ def stage_ga1_ndvi_locally(
         print("   ", item)
 
     for yyyymmdd, platform, epsg in required_dates:
+        yyyymmdd = normalise_yyyymmdd(yyyymmdd)
+        yyyymm = yyyymmdd[:6]
         platform_str = str(platform).strip().lower()
 
         if platform_str.startswith("sl"):
@@ -49,7 +52,7 @@ def stage_ga1_ndvi_locally(
             raise ValueError(f"Unsupported platform format: {platform}")
 
         s3_key = (
-            f"{prefix.rstrip('/')}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymmdd}/"
+            f"{prefix.rstrip('/')}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymm}/"
             f"{platform_tag}olre_{tile}_{yyyymmdd}_ga1-clr_e{epsg}.tif"
         )
         uri = f"s3://{bucket}/{s3_key}"

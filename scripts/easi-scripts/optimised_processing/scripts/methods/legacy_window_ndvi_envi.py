@@ -424,7 +424,7 @@ def write_gtiff(
     arrays,
     georef,
     dtype=gdal.GDT_Byte,
-    nodata=0,
+    nodata: float = 0.0,
     band_names: List[str] | None = None,
 ):
     gt, proj = georef
@@ -1317,17 +1317,27 @@ def main(argv=None) -> int:
     # --------------------------------------------------
     # DIAGNOSTIC OUTPUT: raw combined index (UNSTRETCHED)
     # --------------------------------------------------
-    combined_img = _join_out(diagnostics_base, f"{platform}olre_{tile}_d{sd}{ed}_combined_raw_e{epsg}.tif")
+    # NOTE: This diagnostic raster is intended to be created only when
+    # --diagnostics is enabled.
+    if args.diagnostics:
+        combined_img = _join_out(diagnostics_base, f"{platform}olre_{tile}_d{sd}{ed}_combined_raw_e{epsg}.tif")
 
-    write_gtiff(
-        str(combined_img),
-        [combined_index],
-        georef,
-        dtype=gdal.GDT_Float32,
-        nodata=0,
-    ) 
+        # ArcGIS tends to behave best when float rasters use a conventional
+        # nodata sentinel like -9999 rather than relying on 0.
+        diag_nodata = np.float32(-9999.0)
+        combined_diag = combined_index.astype(np.float32, copy=True)
+        combined_diag[~ndvi_valid] = diag_nodata
 
-    print("file sent to ", combined_img)
+        write_gtiff(
+            str(combined_img),
+            [combined_diag],
+            georef,
+            dtype=gdal.GDT_Float32,
+            nodata=float(diag_nodata),
+            band_names=["combined_index_raw"],
+        )
+
+        print("file sent to ", combined_img)
 
     # In legacy FC:
     #  - spectral_term ≈ small, stable
