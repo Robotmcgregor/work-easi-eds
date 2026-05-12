@@ -424,7 +424,7 @@ def write_gtiff(
     arrays,
     georef,
     dtype=gdal.GDT_Byte,
-    nodata=0,
+    nodata: float = 0.0,
     band_names: List[str] | None = None,
 ):
     gt, proj = georef
