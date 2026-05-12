@@ -1,0 +1,2 @@
+matched_pairs,validated_cleared_polygons,validated_not_cleared_polygons,tp,fn,fp,tn,recall,precision,specificity,accuracy,f1
+4,42,0,42,0,0,0,1.0,1.0,,1.0,1.0

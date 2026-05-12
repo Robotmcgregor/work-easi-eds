@@ -3,6 +3,7 @@ Shim for rsc.utils.masks used by the QLD script.
 Provides mask constants and a simple Masker that treats non-zero as masked.
 Also provides getAvailableMaskname which creates empty masks if missing.
 """
+
 from __future__ import annotations
 
 import os
@@ -42,10 +43,10 @@ def _mask_suffix(mt: int) -> str:
 
 
 def getAvailableMaskname(img_filename: str, masktype: int) -> Optional[str]:
-    """Return a mask filename for the given image. If it does not exist, create an empty mask with same georeference/size.
-    """
+    """Return a mask filename for the given image. If it does not exist, create an empty mask with same georeference/size."""
     from osgeo import gdal
     from rsc.utils.metadb import stdProjFilename
+
     img_path = stdProjFilename(img_filename)
     base = Path(img_path)
     suf = _mask_suffix(masktype)
@@ -61,7 +62,14 @@ def getAvailableMaskname(img_filename: str, masktype: int) -> Optional[str]:
     geotrans = ds.GetGeoTransform(can_return_null=True)
     proj = ds.GetProjection()
     drv = gdal.GetDriverByName("GTiff")
-    out = drv.Create(str(mask_name), xsize, ysize, 1, gdal.GDT_Byte, options=["COMPRESS=LZW", "TILED=YES"])
+    out = drv.Create(
+        str(mask_name),
+        xsize,
+        ysize,
+        1,
+        gdal.GDT_Byte,
+        options=["COMPRESS=LZW", "TILED=YES"],
+    )
     if out is None:
         return None
     if geotrans:

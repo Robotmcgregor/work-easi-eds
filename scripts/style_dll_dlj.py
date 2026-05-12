@@ -35,12 +35,12 @@ def apply_dll_palette(dll_path: str) -> None:
     ct.SetColorEntry(3, (0, 200, 200, 255))
     # 34..39 gradient
     palette = {
-        34: (255, 255, 0, 255),   # yellow
-        35: (255, 200, 0, 255),   # yellow-orange
-        36: (255, 150, 0, 255),   # orange
-        37: (255, 100, 0, 255),   # red-orange
-        38: (255, 0, 0, 255),     # red
-        39: (200, 0, 200, 255),   # purple
+        34: (255, 255, 0, 255),  # yellow
+        35: (255, 200, 0, 255),  # yellow-orange
+        36: (255, 150, 0, 255),  # orange
+        37: (255, 100, 0, 255),  # red-orange
+        38: (255, 0, 0, 255),  # red
+        39: (200, 0, 200, 255),  # purple
     }
     for k, rgba in palette.items():
         ct.SetColorEntry(k, rgba)
@@ -68,8 +68,8 @@ def set_dlj_band_names(dlj_path: str) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description="Style dll/dlj outputs for QGIS")
-    ap.add_argument('--dll', required=True, help='Path to *_dllmz.img')
-    ap.add_argument('--dlj', required=True, help='Path to *_dljmz.img')
+    ap.add_argument("--dll", required=True, help="Path to *_dllmz.img")
+    ap.add_argument("--dlj", required=True, help="Path to *_dljmz.img")
     args = ap.parse_args()
 
     apply_dll_palette(args.dll)
@@ -78,5 +78,5 @@ def main():
     print("        ", args.dlj)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

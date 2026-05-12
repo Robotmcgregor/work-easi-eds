@@ -23,7 +23,9 @@ import re
 from pathlib import Path
 from typing import List, Optional
 
-RE_FC = re.compile(r"^ga_ls_fc_(?P<pr>\d{6})_(?P<ymd>\d{8})_fc3ms(?:_clr)?\.tif$", re.IGNORECASE)
+RE_FC = re.compile(
+    r"^ga_ls_fc_(?P<pr>\d{6})_(?P<ymd>\d{8})_fc3ms(?:_clr)?\.tif$", re.IGNORECASE
+)
 
 
 def scan_local_fc(root: Path, only_tile: Optional[str] = None):
@@ -32,11 +34,15 @@ def scan_local_fc(root: Path, only_tile: Optional[str] = None):
     want_tile = None
     if only_tile:
         t = only_tile.strip()
-        want_tile = t if '_' in t else f"{t[:3]}_{t[3:]}"
+        want_tile = t if "_" in t else f"{t[:3]}_{t[3:]}"
 
     for dirpath, dirnames, filenames in os.walk(root):
         # if scanning a single tile, skip other top-level dirs
-        if want_tile and Path(dirpath).parent == root and Path(dirpath).name != want_tile:
+        if (
+            want_tile
+            and Path(dirpath).parent == root
+            and Path(dirpath).name != want_tile
+        ):
             continue
         for fn in filenames:
             m = RE_FC.match(fn)
@@ -48,22 +54,28 @@ def scan_local_fc(root: Path, only_tile: Optional[str] = None):
             if want_tile and tile != want_tile:
                 continue
             full = str(Path(dirpath) / fn)
-            rows.append({
-                "tile": tile,
-                "date": ymd,
-                "year": ymd[:4],
-                "yearmonth": ymd[:6],
-                "path": full,
-                "filename": fn,
-            })
+            rows.append(
+                {
+                    "tile": tile,
+                    "date": ymd,
+                    "year": ymd[:4],
+                    "yearmonth": ymd[:6],
+                    "path": full,
+                    "filename": fn,
+                }
+            )
     # sort rows for stability
     rows.sort(key=lambda r: (r["tile"], r["date"], r["filename"]))
     return rows
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Inventory local FC files under a root directory")
-    ap.add_argument("--root", required=True, help="Local root folder (e.g., D:\\data\\lsat)")
+    ap = argparse.ArgumentParser(
+        description="Inventory local FC files under a root directory"
+    )
+    ap.add_argument(
+        "--root", required=True, help="Local root folder (e.g., D:\\data\\lsat)"
+    )
     ap.add_argument("--tile", help="Optional tile PPP_RRR or PPPRRR to restrict scan")
     ap.add_argument("--csv", required=True, help="Path to write CSV output")
     args = ap.parse_args(argv)
@@ -77,8 +89,11 @@ def main(argv=None) -> int:
     out = Path(args.csv)
     out.parent.mkdir(parents=True, exist_ok=True)
     import csv
+
     with out.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["tile", "date", "year", "yearmonth", "path", "filename"]) 
+        w = csv.DictWriter(
+            f, fieldnames=["tile", "date", "year", "yearmonth", "path", "filename"]
+        )
         w.writeheader()
         for r in rows:
             w.writerow(r)

@@ -1,6 +1,7 @@
 """
 Minimal STAC client helpers for Landsat discovery via LandsatLook STAC.
 """
+
 from __future__ import annotations
 
 import requests
@@ -9,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 class STACClient:
     def __init__(self, base_url: str = "https://landsatlook.usgs.gov/stac-server"):
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
 
     def search(
         self,
@@ -32,7 +33,10 @@ class STACClient:
             payload["query"] = query
 
         url = f"{self.base_url}/search"
-        headers = {"Content-Type": "application/geo+json", "Accept": "application/geo+json"}
+        headers = {
+            "Content-Type": "application/geo+json",
+            "Accept": "application/geo+json",
+        }
         resp = requests.post(url, json=payload, headers=headers, timeout=60)
         resp.raise_for_status()
         return resp.json()
@@ -59,7 +63,10 @@ class STACClient:
             payload["filter"] = filter_obj
 
         url = f"{self.base_url}/search"
-        headers = {"Content-Type": "application/geo+json", "Accept": "application/geo+json"}
+        headers = {
+            "Content-Type": "application/geo+json",
+            "Accept": "application/geo+json",
+        }
         resp = requests.post(url, json=payload, headers=headers, timeout=60)
         resp.raise_for_status()
         return resp.json()

@@ -20,12 +20,13 @@ try:
 except Exception:
     load_dotenv = None  # type: ignore
 if load_dotenv:
-    for candidate in [ROOT/".env", ROOT.parent/".env", Path.cwd()/".env"]:
+    for candidate in [ROOT / ".env", ROOT.parent / ".env", Path.cwd() / ".env"]:
         if candidate.exists():
             load_dotenv(dotenv_path=candidate, override=False)
             break
 
 import importlib.util
+
 
 def _load_s3client_dynamic():
     root = Path(__file__).resolve().parent.parent
@@ -35,13 +36,15 @@ def _load_s3client_dynamic():
         raise RuntimeError(f"Unable to load S3 client module from {mod_path}")
     mod = importlib.util.module_from_spec(spec)
     import sys as _sys
+
     _sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return getattr(mod, "S3Client")
 
-def candidate_prefixes(tile: str, base_prefix: str|None):
+
+def candidate_prefixes(tile: str, base_prefix: str | None):
     tile = tile.strip()
-    if '_' not in tile and len(tile) == 6 and tile.isdigit():
+    if "_" not in tile and len(tile) == 6 and tile.isdigit():
         tile_pp_rr = f"{tile[:3]}_{tile[3:]}"
     else:
         tile_pp_rr = tile
@@ -54,8 +57,9 @@ def candidate_prefixes(tile: str, base_prefix: str|None):
     try:
         # Heuristic: recent decade
         import datetime as _dt
+
         cy = _dt.datetime.utcnow().year
-        years = list(range(cy, cy-12, -1))
+        years = list(range(cy, cy - 12, -1))
     except Exception:
         years = []
 
@@ -63,8 +67,8 @@ def candidate_prefixes(tile: str, base_prefix: str|None):
     # base tile forms
     variants.append(tile)
     variants.append(tile_pp_rr)
-    if tile_pp_rr.replace('_','') not in variants:
-        variants.append(tile_pp_rr.replace('_',''))
+    if tile_pp_rr.replace("_", "") not in variants:
+        variants.append(tile_pp_rr.replace("_", ""))
 
     prefixes = []
     for v in variants:
@@ -77,13 +81,16 @@ def candidate_prefixes(tile: str, base_prefix: str|None):
         return [f"{base_prefix}/{p}" for p in prefixes]
     return prefixes
 
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="List sample S3 keys for a tile")
     ap.add_argument("--bucket", default=os.getenv("S3_BUCKET", ""), required=False)
     ap.add_argument("--base-prefix", default=os.getenv("S3_BASE_PREFIX", ""))
     ap.add_argument("--tile", required=True)
     ap.add_argument("--limit", type=int, default=50)
-    ap.add_argument("--region", default=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "")))
+    ap.add_argument(
+        "--region", default=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", ""))
+    )
     ap.add_argument("--endpoint", default=os.getenv("S3_ENDPOINT_URL", ""))
     ap.add_argument("--role-arn", default=os.getenv("S3_ROLE_ARN", ""))
     args = ap.parse_args(argv)
@@ -93,10 +100,19 @@ def main(argv=None):
         return 1
 
     # If static keys present ignore profile
-    profile = "" if (os.getenv("AWS_ACCESS_KEY_ID") and os.getenv("AWS_SECRET_ACCESS_KEY")) else os.getenv("AWS_PROFILE", "")
+    profile = (
+        ""
+        if (os.getenv("AWS_ACCESS_KEY_ID") and os.getenv("AWS_SECRET_ACCESS_KEY"))
+        else os.getenv("AWS_PROFILE", "")
+    )
     S3Client = _load_s3client_dynamic()
-    s3 = S3Client(bucket=args.bucket, region=args.region or "", profile=profile,
-                  endpoint_url=args.endpoint or "", role_arn=args.role_arn or "")
+    s3 = S3Client(
+        bucket=args.bucket,
+        region=args.region or "",
+        profile=profile,
+        endpoint_url=args.endpoint or "",
+        role_arn=args.role_arn or "",
+    )
     prefixes = candidate_prefixes(args.tile, args.base_prefix or None)
 
     print("Config:")
@@ -119,6 +135,7 @@ def main(argv=None):
     else:
         print(f"\n[INFO] Displayed {shown} key(s)")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

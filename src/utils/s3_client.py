@@ -33,6 +33,7 @@ try:
 except Exception:  # pragma: no cover - graceful if boto3 not installed
     boto3 = None
     ClientError = Exception
+
     class ProfileNotFound(Exception):
         pass
 
@@ -46,12 +47,25 @@ class S3Auth:
 
 
 class S3Client:
-    def __init__(self, bucket: str, region: str = "", profile: str = "", endpoint_url: str = "", role_arn: str = ""):
+    def __init__(
+        self,
+        bucket: str,
+        region: str = "",
+        profile: str = "",
+        endpoint_url: str = "",
+        role_arn: str = "",
+    ):
         if not boto3:
-            raise RuntimeError("boto3 is required for S3 operations. Please install boto3 and retry.")
+            raise RuntimeError(
+                "boto3 is required for S3 operations. Please install boto3 and retry."
+            )
         self.bucket = bucket
         # Prefer explicit region, else AWS_REGION, else AWS_DEFAULT_REGION
-        self.region = region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+        self.region = (
+            region
+            or os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+        )
         # Respect explicit empty string ("") to mean "do not use profile"
         if profile is None:
             self.profile = os.environ.get("AWS_PROFILE")
@@ -75,9 +89,15 @@ class S3Client:
                 pass
         if self.profile:
             try:
-                session = boto3.Session(profile_name=self.profile, region_name=self.region or None)
+                session = boto3.Session(
+                    profile_name=self.profile, region_name=self.region or None
+                )
             except Exception as e:  # includes ProfileNotFound
-                logger.warning("AWS profile '%s' not found or unusable; falling back to default credentials. (%s)", self.profile, e)
+                logger.warning(
+                    "AWS profile '%s' not found or unusable; falling back to default credentials. (%s)",
+                    self.profile,
+                    e,
+                )
                 session = boto3.Session(region_name=self.region or None)
         else:
             session = boto3.Session(region_name=self.region or None)
@@ -85,7 +105,9 @@ class S3Client:
         # Assume role if provided
         if self.role_arn:
             sts = session.client("sts")
-            resp = sts.assume_role(RoleArn=self.role_arn, RoleSessionName="eds-s3-session")
+            resp = sts.assume_role(
+                RoleArn=self.role_arn, RoleSessionName="eds-s3-session"
+            )
             creds = resp["Credentials"]
             self._client = boto3.client(
                 "s3",
@@ -98,7 +120,9 @@ class S3Client:
         else:
             self._client = session.client("s3", endpoint_url=self.endpoint_url or None)
 
-    def list_prefix(self, prefix: str, recursive: bool = True, max_keys: Optional[int] = None) -> Generator[str, None, None]:
+    def list_prefix(
+        self, prefix: str, recursive: bool = True, max_keys: Optional[int] = None
+    ) -> Generator[str, None, None]:
         """Yield object keys under the given prefix.
 
         Args:
@@ -123,7 +147,10 @@ class S3Client:
             self._client.head_object(Bucket=self.bucket, Key=key)
             return True
         except ClientError as e:
-            if getattr(e, "response", {}).get("Error", {}).get("Code") in ("404", "NoSuchKey"):
+            if getattr(e, "response", {}).get("Error", {}).get("Code") in (
+                "404",
+                "NoSuchKey",
+            ):
                 return False
             raise
 
@@ -139,16 +166,30 @@ class S3Client:
         self._client.download_file(self.bucket, key, dest_path)
         return dest_path
 
-    def download_prefix(self, prefix: str, dest_dir: str, overwrite: bool = False, max_files: Optional[int] = None) -> List[str]:
+    def download_prefix(
+        self,
+        prefix: str,
+        dest_dir: str,
+        overwrite: bool = False,
+        max_files: Optional[int] = None,
+    ) -> List[str]:
         os.makedirs(dest_dir, exist_ok=True)
         downloaded: List[str] = []
-        for i, key in enumerate(self.list_prefix(prefix, recursive=True, max_keys=max_files)):
+        for i, key in enumerate(
+            self.list_prefix(prefix, recursive=True, max_keys=max_files)
+        ):
             dest_path = os.path.join(dest_dir, os.path.basename(key))
             self.download(key, dest_path, overwrite=overwrite)
             downloaded.append(dest_path)
         return downloaded
 
-    def upload(self, src_path: str, key: str, overwrite: bool = False, content_type: Optional[str] = None) -> str:
+    def upload(
+        self,
+        src_path: str,
+        key: str,
+        overwrite: bool = False,
+        content_type: Optional[str] = None,
+    ) -> str:
         """Upload a local file to S3 at the specified key.
 
         Args:

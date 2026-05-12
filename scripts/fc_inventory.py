@@ -27,13 +27,16 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import sys
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.utils.s3_client import S3Client
+
 try:
     from dotenv import load_dotenv, find_dotenv  # optional
+
     _DOTENV_AVAILABLE = True
 except Exception:
     _DOTENV_AVAILABLE = False
@@ -41,7 +44,11 @@ except Exception:
 
 def _candidate_prefixes(tile_id: str, base_prefix: Optional[str]) -> List[str]:
     no_us = f"{tile_id}/"
-    with_us = f"{tile_id[:3]}_{tile_id[3:]}/" if len(tile_id) == 6 and tile_id.isdigit() else f"{tile_id}/"
+    with_us = (
+        f"{tile_id[:3]}_{tile_id[3:]}/"
+        if len(tile_id) == 6 and tile_id.isdigit()
+        else f"{tile_id}/"
+    )
     prefixes = [no_us, with_us]
     prefixes = list(dict.fromkeys(prefixes))
     if base_prefix:
@@ -57,31 +64,55 @@ def _parse_date_from_key(key: str) -> Tuple[Optional[int], Optional[str]]:
         ymd = m.group(1)
         return int(ymd[:4]), ymd[:6]
     # Fallback to path segments .../YYYY/YYYYMM/
-    parts = key.split('/')
+    parts = key.split("/")
     year = None
     yearmonth = None
     for i, seg in enumerate(parts):
-        if len(seg) == 4 and seg.isdigit() and (seg.startswith('19') or seg.startswith('20')):
+        if (
+            len(seg) == 4
+            and seg.isdigit()
+            and (seg.startswith("19") or seg.startswith("20"))
+        ):
             year = int(seg)
-            if i + 1 < len(parts) and len(parts[i+1]) == 6 and parts[i+1].isdigit():
-                yearmonth = parts[i+1]
+            if i + 1 < len(parts) and len(parts[i + 1]) == 6 and parts[i + 1].isdigit():
+                yearmonth = parts[i + 1]
             break
     return year, yearmonth
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="List GA FC fc3ms(_clr) files in S3 for a tile; optional raw listing for debugging")
+    ap = argparse.ArgumentParser(
+        description="List GA FC fc3ms(_clr) files in S3 for a tile; optional raw listing for debugging"
+    )
     ap.add_argument("tile_id", help="Tile id, e.g., 090084")
-    ap.add_argument("--bucket", help="S3 bucket (defaults to env S3_BUCKET if not provided)")
-    ap.add_argument("--region", help="AWS region (defaults to AWS_REGION/AWS_DEFAULT_REGION)")
+    ap.add_argument(
+        "--bucket", help="S3 bucket (defaults to env S3_BUCKET if not provided)"
+    )
+    ap.add_argument(
+        "--region", help="AWS region (defaults to AWS_REGION/AWS_DEFAULT_REGION)"
+    )
     ap.add_argument("--profile", help="AWS profile (defaults to AWS_PROFILE)")
     ap.add_argument("--endpoint", help="S3 endpoint URL (optional; S3_ENDPOINT_URL)")
-    ap.add_argument("--role-arn", dest="role_arn", help="Assume role ARN (optional; S3_ROLE_ARN)")
-    ap.add_argument("--base-prefix", help="Base prefix under bucket (defaults to S3_BASE_PREFIX)")
+    ap.add_argument(
+        "--role-arn", dest="role_arn", help="Assume role ARN (optional; S3_ROLE_ARN)"
+    )
+    ap.add_argument(
+        "--base-prefix", help="Base prefix under bucket (defaults to S3_BASE_PREFIX)"
+    )
     ap.add_argument("--limit", type=int, help="Optional cap on rows")
-    ap.add_argument("--list-raw", action="store_true", help="Print raw S3 keys under the candidate tile prefixes (for debugging)")
-    ap.add_argument("--verbose", action="store_true", help="Print resolved config and prefixes")
-    ap.add_argument("--no-base-prefix", action="store_true", help="Ignore S3_BASE_PREFIX and scan from bucket root")
+    ap.add_argument(
+        "--list-raw",
+        action="store_true",
+        help="Print raw S3 keys under the candidate tile prefixes (for debugging)",
+    )
+    ap.add_argument(
+        "--verbose", action="store_true", help="Print resolved config and prefixes"
+    )
+    ap.add_argument(
+        "--no-base-prefix",
+        action="store_true",
+        help="Ignore S3_BASE_PREFIX and scan from bucket root",
+    )
     ap.add_argument("--csv", help="Write CSV output to this path")
     args = ap.parse_args(argv)
     # Load .env so AWS_* variables become available to the process
@@ -97,11 +128,12 @@ def main(argv=None) -> int:
             try:
                 for line in env_path.read_text(encoding="utf-8").splitlines():
                     line = line.strip()
-                    if not line or line.startswith('#'):
+                    if not line or line.startswith("#"):
                         continue
-                    if '=' in line:
-                        k, v = line.split('=', 1)
-                        k = k.strip(); v = v.strip()
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip()
                         if k and (k not in os.environ):
                             os.environ[k] = v
             except Exception:
@@ -111,7 +143,9 @@ def main(argv=None) -> int:
     bucket = args.bucket or os.getenv("S3_BUCKET")
     if not bucket:
         raise SystemExit("--bucket not provided and S3_BUCKET not set in environment")
-    region = args.region or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or ""
+    region = (
+        args.region or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or ""
+    )
     profile = args.profile or os.getenv("AWS_PROFILE") or ""
     endpoint = args.endpoint or os.getenv("S3_ENDPOINT_URL") or ""
     role_arn = args.role_arn or os.getenv("S3_ROLE_ARN") or ""
@@ -123,7 +157,13 @@ def main(argv=None) -> int:
     else:
         base_prefix = os.getenv("S3_BASE_PREFIX") or None
 
-    s3 = S3Client(bucket=bucket, region=region, profile=profile, endpoint_url=endpoint, role_arn=role_arn)
+    s3 = S3Client(
+        bucket=bucket,
+        region=region,
+        profile=profile,
+        endpoint_url=endpoint,
+        role_arn=role_arn,
+    )
     prefixes = _candidate_prefixes(args.tile_id, base_prefix)
 
     if args.verbose or args.list_raw:
@@ -162,9 +202,21 @@ def main(argv=None) -> int:
         try:
             for key in s3.list_prefix(pfx, recursive=True, max_keys=None):
                 # Accept both fc3ms and fc3ms_clr endings
-                if re.search(r"_(fc3ms(?:_clr)?)\.tif{1,2}$", os.path.basename(key), flags=re.IGNORECASE):
+                if re.search(
+                    r"_(fc3ms(?:_clr)?)\.tif{1,2}$",
+                    os.path.basename(key),
+                    flags=re.IGNORECASE,
+                ):
                     year, yearmonth = _parse_date_from_key(key)
-                    rows.append((args.tile_id, year or "", yearmonth or "", key, os.path.basename(key)))
+                    rows.append(
+                        (
+                            args.tile_id,
+                            year or "",
+                            yearmonth or "",
+                            key,
+                            os.path.basename(key),
+                        )
+                    )
                     if args.limit and len(rows) >= args.limit:
                         break
             if args.limit and len(rows) >= args.limit:
@@ -184,6 +236,7 @@ def main(argv=None) -> int:
         out = Path(args.csv)
         out.parent.mkdir(parents=True, exist_ok=True)
         import csv
+
         with open(out, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["tile", "year", "yearmonth", "key", "filename"])

@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Set, Dict, Any
 
 import sys
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -48,6 +49,7 @@ import urllib.request
 import json
 from functools import lru_cache
 
+
 def _load_s3client_from_file() -> Any:
     s3_path = ROOT / "src" / "utils" / "s3_client.py"
     if not s3_path.exists():
@@ -57,11 +59,13 @@ def _load_s3client_from_file() -> Any:
         raise RuntimeError("Failed to create module spec for s3_client")
     mod = importlib.util.module_from_spec(spec)
     import sys as _sys
+
     _sys.modules[spec.name] = mod  # Register so dataclasses can resolve module
     spec.loader.exec_module(mod)  # type: ignore[attr-defined]
     if not hasattr(mod, "S3Client"):
         raise RuntimeError("s3_client module does not define S3Client")
     return getattr(mod, "S3Client")
+
 
 S3Client = _load_s3client_from_file()
 
@@ -70,6 +74,7 @@ try:
     from dotenv import load_dotenv  # type: ignore
 except Exception:
     load_dotenv = None  # type: ignore[assignment]
+
 
 def _load_env_if_present() -> None:
     """Load environment variables from a nearby .env file if python-dotenv is available.
@@ -90,7 +95,7 @@ def _load_env_if_present() -> None:
 
 def _candidate_prefixes(tile: str, base_prefix: Optional[str]) -> List[str]:
     tile = tile.strip()
-    if '_' not in tile and len(tile) == 6 and tile.isdigit():
+    if "_" not in tile and len(tile) == 6 and tile.isdigit():
         tile_pp_rr = f"{tile[:3]}_{tile[3:]}"
     else:
         tile_pp_rr = tile
@@ -141,11 +146,15 @@ def _collect_fc_keys_by_yearmonth(s3: Any, prefixes: List[str]) -> Dict[str, Lis
                 _, ym = _parse_year_month_from_name(base)
                 if not ym:
                     # fallback to path segments .../YYYY/YYYYMM/
-                    parts = key.split('/')
+                    parts = key.split("/")
                     for i, seg in enumerate(parts):
                         if len(seg) == 4 and seg.isdigit():
-                            if i + 1 < len(parts) and len(parts[i+1]) == 6 and parts[i+1].isdigit():
-                                ym = parts[i+1]
+                            if (
+                                i + 1 < len(parts)
+                                and len(parts[i + 1]) == 6
+                                and parts[i + 1].isdigit()
+                            ):
+                                ym = parts[i + 1]
                             break
                 if ym and len(ym) == 6 and ym.isdigit():
                     by_ym.setdefault(ym, []).append(key)
@@ -162,7 +171,13 @@ _SR_COLLECTIONS = ["ga_ls9c_ard_3", "ga_ls8c_ard_3"]
 _WORLD_BBOX = [-180.0, -90.0, 180.0, 90.0]
 
 
-def _build_stac_search_url(base_url: str, collection: str, bbox: List[float], time_range: str, limit: int = 2000) -> str:
+def _build_stac_search_url(
+    base_url: str,
+    collection: str,
+    bbox: List[float],
+    time_range: str,
+    limit: int = 2000,
+) -> str:
     bbox_s = ",".join(str(x) for x in bbox)
     return (
         f"{base_url.rstrip('/')}/search?collection={collection}"
@@ -176,9 +191,17 @@ def _extract_feature_pathrow_from_assets(feature: Dict[str, Any]) -> Optional[st
     # Parse any likely asset URL to discover the path/row segments
     candidate_assets = {
         # FC bands
-        "bs", "pv", "npv",
+        "bs",
+        "pv",
+        "npv",
         # SR common assets
-        "oa_fmask", "nbart_blue", "nbart_green", "nbart_red", "nbart_nir", "nbart_swir_1", "nbart_swir_2",
+        "oa_fmask",
+        "nbart_blue",
+        "nbart_green",
+        "nbart_red",
+        "nbart_nir",
+        "nbart_swir_1",
+        "nbart_swir_2",
     }
     for asset_name, asset in feature.get("assets", {}).items():
         if asset_name in candidate_assets:
@@ -197,7 +220,7 @@ def _parse_iso_date(s: str) -> Optional[str]:
         # Return YYYY-MM-DD
         if len(s) == 8 and s.isdigit():
             return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
-        if len(s) == 10 and s[4] == '-' and s[7] == '-':
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
             return s
     except Exception:
         pass
@@ -205,7 +228,9 @@ def _parse_iso_date(s: str) -> Optional[str]:
 
 
 @lru_cache(maxsize=4096)
-def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days: int = 7) -> Optional[str]:
+def resolve_fc_platform_for_tile_date(
+    path: str, row: str, ymd: str, search_days: int = 7
+) -> Optional[str]:
     """Return platform string (e.g., 'landsat-8' or 'landsat-9') for a given tile/date FC, else None.
 
     Uses DEA STAC search on ga_ls_fc_3 for the exact date and filters items by path/row from asset URLs.
@@ -221,7 +246,9 @@ def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days
     last_err = None
     for base in _DEA_STAC_ROOTS:
         try:
-            url = _build_stac_search_url(base, _FC_COLLECTION, _WORLD_BBOX, time_range, limit=2000)
+            url = _build_stac_search_url(
+                base, _FC_COLLECTION, _WORLD_BBOX, time_range, limit=2000
+            )
             with urllib.request.urlopen(url) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             break
@@ -242,6 +269,7 @@ def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days
     try:
         # Build a small time window around the date
         from datetime import datetime, timedelta
+
         d0 = datetime.strptime(date_str, "%Y-%m-%d")
         start = (d0 - timedelta(days=search_days)).strftime("%Y-%m-%d")
         end = (d0 + timedelta(days=search_days)).strftime("%Y-%m-%d")
@@ -256,7 +284,9 @@ def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days
             data_sr = None
             for base in _DEA_STAC_ROOTS:
                 try:
-                    url_sr = _build_stac_search_url(base, coll, _WORLD_BBOX, time_range_sr, limit=2000)
+                    url_sr = _build_stac_search_url(
+                        base, coll, _WORLD_BBOX, time_range_sr, limit=2000
+                    )
                     with urllib.request.urlopen(url_sr) as resp:
                         data_sr = json.loads(resp.read().decode("utf-8"))
                     break
@@ -299,30 +329,66 @@ def resolve_fc_platform_for_tile_date(path: str, row: str, ymd: str, search_days
 def main(argv=None) -> int:
     # Ensure env defaults (S3_BUCKET, AWS_REGION, etc.) are loaded from .env before reading os.getenv
     _load_env_if_present()
-    ap = argparse.ArgumentParser(description="Download FC fc3ms files from S3 for a tile/date list")
-    ap.add_argument("--tile", required=True, help="Tile PPP_RRR or PPPRRR, e.g., 089_080")
+    ap = argparse.ArgumentParser(
+        description="Download FC fc3ms files from S3 for a tile/date list"
+    )
+    ap.add_argument(
+        "--tile", required=True, help="Tile PPP_RRR or PPPRRR, e.g., 089_080"
+    )
 
     # Selection modes
-    ap.add_argument("--dates", help="Comma-separated YYYYMMDD list (explicit date mode)")
-    ap.add_argument("--start-yyyymm", help="Seasonal mode: start YYYYMM (months only considered)")
-    ap.add_argument("--end-yyyymm", help="Seasonal mode: end YYYYMM (defines end year for span)")
-    ap.add_argument("--span-years", type=int, default=10, help="Years back including end year (default 10)")
+    ap.add_argument(
+        "--dates", help="Comma-separated YYYYMMDD list (explicit date mode)"
+    )
+    ap.add_argument(
+        "--start-yyyymm", help="Seasonal mode: start YYYYMM (months only considered)"
+    )
+    ap.add_argument(
+        "--end-yyyymm", help="Seasonal mode: end YYYYMM (defines end year for span)"
+    )
+    ap.add_argument(
+        "--span-years",
+        type=int,
+        default=10,
+        help="Years back including end year (default 10)",
+    )
 
-    ap.add_argument("--dest", default=r"D:\\data\\lsat", help="Destination root directory")
-    ap.add_argument("--dry-run", action="store_true", help="Print matches; do not download")
+    ap.add_argument(
+        "--dest", default=r"D:\\data\\lsat", help="Destination root directory"
+    )
+    ap.add_argument(
+        "--dry-run", action="store_true", help="Print matches; do not download"
+    )
     ap.add_argument("--limit", type=int, default=None, help="Optional cap on downloads")
-    ap.add_argument("--csv", help="Write a CSV report of identified and downloaded items")
-    ap.add_argument("--csv-include-expected", action="store_true", help="For seasonal mode, include rows for expected YYYYMM with no matches")
-    ap.add_argument("--on-exists", choices=["skip", "overwrite"], default="skip", help="If file exists locally: skip (default) or overwrite")
+    ap.add_argument(
+        "--csv", help="Write a CSV report of identified and downloaded items"
+    )
+    ap.add_argument(
+        "--csv-include-expected",
+        action="store_true",
+        help="For seasonal mode, include rows for expected YYYYMM with no matches",
+    )
+    ap.add_argument(
+        "--on-exists",
+        choices=["skip", "overwrite"],
+        default="skip",
+        help="If file exists locally: skip (default) or overwrite",
+    )
 
     # S3 config
     ap.add_argument("--bucket", default=os.getenv("S3_BUCKET", ""))
-    ap.add_argument("--region", default=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "")))
+    ap.add_argument(
+        "--region", default=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", ""))
+    )
     ap.add_argument("--profile", default=os.getenv("AWS_PROFILE", ""))
     ap.add_argument("--endpoint", default=os.getenv("S3_ENDPOINT_URL", ""))
     ap.add_argument("--role-arn", dest="role_arn", default=os.getenv("S3_ROLE_ARN", ""))
     ap.add_argument("--base-prefix", default=os.getenv("S3_BASE_PREFIX", ""))
-    ap.add_argument("--no-base-prefix", action="store_true", help="Ignore S3_BASE_PREFIX and scan from bucket root")
+    ap.add_argument(
+        "--no-base-prefix",
+        action="store_true",
+        help="Ignore S3_BASE_PREFIX and scan from bucket root",
+    )
 
     args = ap.parse_args(argv)
 
@@ -354,15 +420,17 @@ def main(argv=None) -> int:
     dates: List[str] = []
     seasonal_mode = False
     if args.dates:
-        dates = [d.strip() for d in args.dates.split(',') if d.strip()]
+        dates = [d.strip() for d in args.dates.split(",") if d.strip()]
     else:
         if not (args.start_yyyymm and args.end_yyyymm):
             raise SystemExit("Provide --dates OR both --start-yyyymm and --end-yyyymm")
         if len(args.start_yyyymm) != 6 or len(args.end_yyyymm) != 6:
             raise SystemExit("--start-yyyymm and --end-yyyymm must be YYYYMM")
         try:
-            s_year = int(args.start_yyyymm[:4]); s_mon = int(args.start_yyyymm[4:])
-            e_year = int(args.end_yyyymm[:4]);   e_mon = int(args.end_yyyymm[4:])
+            s_year = int(args.start_yyyymm[:4])
+            s_mon = int(args.start_yyyymm[4:])
+            e_year = int(args.end_yyyymm[:4])
+            e_mon = int(args.end_yyyymm[4:])
         except ValueError:
             raise SystemExit("Invalid YYYYMM values for seasonal mode")
         months = _season_months(s_mon, e_mon)
@@ -379,7 +447,9 @@ def main(argv=None) -> int:
     print(f"  region   : {args.region or '(default)'}")
     print(f"  basePref : {base_prefix if base_prefix else '(none)'}")
     if seasonal_mode:
-        print(f"  season   : months={','.join(f'{m:02d}' for m in months)} years={years[0]}..{years[-1]}")
+        print(
+            f"  season   : months={','.join(f'{m:02d}' for m in months)} years={years[0]}..{years[-1]}"
+        )
     print("Candidate prefixes:")
     for p in prefixes:
         print(f"  - {p}")
@@ -396,7 +466,11 @@ def main(argv=None) -> int:
                     break
                 year = ym[:4]
                 yearmonth = ym
-                pr_folder = args.tile if '_' in args.tile else f"{args.tile[:3]}_{args.tile[3:]}"
+                pr_folder = (
+                    args.tile
+                    if "_" in args.tile
+                    else f"{args.tile[:3]}_{args.tile[3:]}"
+                )
                 dest_dir = dest_root / pr_folder / year / yearmonth
                 _ensure_dir(dest_dir)
                 dest_path = dest_dir / os.path.basename(found_key)
@@ -405,7 +479,9 @@ def main(argv=None) -> int:
                 ymd = None
                 if ym_guess:
                     # derive date as the first 8 digits after last underscore
-                    m = re.search(r"_(\d{8})(?:_|\.tif{1,2}$)", os.path.basename(found_key))
+                    m = re.search(
+                        r"_(\d{8})(?:_|\.tif{1,2}$)", os.path.basename(found_key)
+                    )
                     if m:
                         ymd = m.group(1)
                 # Enforce LS8/LS9-only FC by checking platform from DEA STAC
@@ -414,92 +490,121 @@ def main(argv=None) -> int:
                 else:
                     plat = None
                 if plat not in ("landsat-8", "landsat-9"):
-                    print(f"[SKIP] non-LS8/9 FC (platform={plat or 'unknown'}) for {args.tile} {ymd or '?'} -> {found_key}")
-                    records.append({
-                        "mode": "seasonal",
-                        "tile": args.tile,
-                        "year": year,
-                        "yearmonth": yearmonth,
-                        "date": ymd or "",
-                        "key": found_key,
-                        "filename": os.path.basename(found_key),
-                        "dest": str(dest_path),
-                        "action": "SKIP-NON-LS8-9",
-                    })
+                    print(
+                        f"[SKIP] non-LS8/9 FC (platform={plat or 'unknown'}) for {args.tile} {ymd or '?'} -> {found_key}"
+                    )
+                    records.append(
+                        {
+                            "mode": "seasonal",
+                            "tile": args.tile,
+                            "year": year,
+                            "yearmonth": yearmonth,
+                            "date": ymd or "",
+                            "key": found_key,
+                            "filename": os.path.basename(found_key),
+                            "dest": str(dest_path),
+                            "action": "SKIP-NON-LS8-9",
+                        }
+                    )
                     continue
                 if args.dry_run:
                     print(f"[HIT] {found_key} -> {dest_path}")
                     downloads += 1
-                    records.append({
-                        "mode": "seasonal",
-                        "tile": args.tile,
-                        "year": year,
-                        "yearmonth": yearmonth,
-                        "date": ymd or "",
-                        "key": found_key,
-                        "filename": os.path.basename(found_key),
-                        "dest": str(dest_path),
-                        "action": "HIT (dry-run)",
-                    })
+                    records.append(
+                        {
+                            "mode": "seasonal",
+                            "tile": args.tile,
+                            "year": year,
+                            "yearmonth": yearmonth,
+                            "date": ymd or "",
+                            "key": found_key,
+                            "filename": os.path.basename(found_key),
+                            "dest": str(dest_path),
+                            "action": "HIT (dry-run)",
+                        }
+                    )
                     continue
                 # Handle existing file behaviour
                 if dest_path.exists() and args.on_exists == "skip":
                     print(f"[SKIP] exists: {dest_path}")
-                    records.append({
-                        "mode": "seasonal",
-                        "tile": args.tile,
-                        "year": year,
-                        "yearmonth": yearmonth,
-                        "date": ymd or "",
-                        "key": found_key,
-                        "filename": os.path.basename(found_key),
-                        "dest": str(dest_path),
-                        "action": "SKIP-EXISTS",
-                    })
+                    records.append(
+                        {
+                            "mode": "seasonal",
+                            "tile": args.tile,
+                            "year": year,
+                            "yearmonth": yearmonth,
+                            "date": ymd or "",
+                            "key": found_key,
+                            "filename": os.path.basename(found_key),
+                            "dest": str(dest_path),
+                            "action": "SKIP-EXISTS",
+                        }
+                    )
                     continue
                 try:
-                    s3.download(found_key, str(dest_path), overwrite=(args.on_exists == "overwrite"))
+                    s3.download(
+                        found_key,
+                        str(dest_path),
+                        overwrite=(args.on_exists == "overwrite"),
+                    )
                     print(f"[OK] {found_key} -> {dest_path}")
                     downloads += 1
-                    records.append({
-                        "mode": "seasonal",
-                        "tile": args.tile,
-                        "year": year,
-                        "yearmonth": yearmonth,
-                        "date": ymd or "",
-                        "key": found_key,
-                        "filename": os.path.basename(found_key),
-                        "dest": str(dest_path),
-                        "action": "DOWNLOADED",
-                    })
+                    records.append(
+                        {
+                            "mode": "seasonal",
+                            "tile": args.tile,
+                            "year": year,
+                            "yearmonth": yearmonth,
+                            "date": ymd or "",
+                            "key": found_key,
+                            "filename": os.path.basename(found_key),
+                            "dest": str(dest_path),
+                            "action": "DOWNLOADED",
+                        }
+                    )
                 except Exception as e:
                     print(f"[ERR] download failed {found_key}: {e}")
-                    records.append({
-                        "mode": "seasonal",
-                        "tile": args.tile,
-                        "year": year,
-                        "yearmonth": yearmonth,
-                        "date": ymd or "",
-                        "key": found_key,
-                        "filename": os.path.basename(found_key),
-                        "dest": str(dest_path),
-                        "action": f"ERROR: {e}",
-                    })
+                    records.append(
+                        {
+                            "mode": "seasonal",
+                            "tile": args.tile,
+                            "year": year,
+                            "yearmonth": yearmonth,
+                            "date": ymd or "",
+                            "key": found_key,
+                            "filename": os.path.basename(found_key),
+                            "dest": str(dest_path),
+                            "action": f"ERROR: {e}",
+                        }
+                    )
         if args.csv and args.csv_include_expected:
             # Add rows for expected YYYYMMs that had no matches
             for ym in sorted(allowed_ym):
                 if ym not in by_ym or not by_ym[ym]:
-                    records.append({
-                        "mode": "seasonal",
-                        "tile": args.tile,
-                        "year": ym[:4],
-                        "yearmonth": ym,
-                        "date": "",
-                        "key": "",
-                        "filename": "",
-                        "dest": str((dest_root / (args.tile if '_' in args.tile else f"{args.tile[:3]}_{args.tile[3:]}") / ym[:4] / ym)),
-                        "action": "EXPECTED-NOT-FOUND",
-                    })
+                    records.append(
+                        {
+                            "mode": "seasonal",
+                            "tile": args.tile,
+                            "year": ym[:4],
+                            "yearmonth": ym,
+                            "date": "",
+                            "key": "",
+                            "filename": "",
+                            "dest": str(
+                                (
+                                    dest_root
+                                    / (
+                                        args.tile
+                                        if "_" in args.tile
+                                        else f"{args.tile[:3]}_{args.tile[3:]}"
+                                    )
+                                    / ym[:4]
+                                    / ym
+                                )
+                            ),
+                            "action": "EXPECTED-NOT-FOUND",
+                        }
+                    )
     else:
         # Explicit dates mode (original logic)
         for date in dates:
@@ -519,29 +624,46 @@ def main(argv=None) -> int:
             if not found_key:
                 print(f"[MISS] {args.tile} {date} (no fc3ms(_clr) found)")
                 if args.csv:
-                    records.append({
-                        "mode": "dates",
-                        "tile": args.tile,
-                        "year": date[:4],
-                        "yearmonth": date[:6],
-                        "date": date,
-                        "key": "",
-                        "filename": "",
-                        "dest": str((dest_root / (args.tile if '_' in args.tile else f"{args.tile[:3]}_{args.tile[3:]}") / date[:4] / date[:6])),
-                        "action": "MISS",
-                    })
+                    records.append(
+                        {
+                            "mode": "dates",
+                            "tile": args.tile,
+                            "year": date[:4],
+                            "yearmonth": date[:6],
+                            "date": date,
+                            "key": "",
+                            "filename": "",
+                            "dest": str(
+                                (
+                                    dest_root
+                                    / (
+                                        args.tile
+                                        if "_" in args.tile
+                                        else f"{args.tile[:3]}_{args.tile[3:]}"
+                                    )
+                                    / date[:4]
+                                    / date[:6]
+                                )
+                            ),
+                            "action": "MISS",
+                        }
+                    )
                 continue
 
             # Determine year/yearmonth from the filename
             year, yearmonth = _parse_year_month_from_name(os.path.basename(found_key))
             # Fallback to path parts if needed
             if not (year and yearmonth):
-                parts = found_key.split('/')
+                parts = found_key.split("/")
                 for i, seg in enumerate(parts):
                     if len(seg) == 4 and seg.isdigit():
                         year = year or seg
-                        if i + 1 < len(parts) and len(parts[i+1]) == 6 and parts[i+1].isdigit():
-                            yearmonth = yearmonth or parts[i+1]
+                        if (
+                            i + 1 < len(parts)
+                            and len(parts[i + 1]) == 6
+                            and parts[i + 1].isdigit()
+                        ):
+                            yearmonth = yearmonth or parts[i + 1]
                         break
             year = year or date[:4]
             yearmonth = yearmonth or date[:6]
@@ -549,22 +671,39 @@ def main(argv=None) -> int:
             # Enforce LS8/LS9-only FC by checking platform via DEA STAC
             plat = resolve_fc_platform_for_tile_date(path_str, row_str, date)
             if plat not in ("landsat-8", "landsat-9"):
-                print(f"[SKIP] non-LS8/9 FC (platform={plat or 'unknown'}) for {args.tile} {date} -> {found_key}")
-                records.append({
-                    "mode": "dates",
-                    "tile": args.tile,
-                    "year": year,
-                    "yearmonth": yearmonth,
-                    "date": date,
-                    "key": found_key,
-                    "filename": os.path.basename(found_key),
-                    "dest": str((dest_root / (args.tile if '_' in args.tile else f"{args.tile[:3]}_{args.tile[3:]}") / year / yearmonth)),
-                    "action": "SKIP-NON-LS8-9",
-                })
+                print(
+                    f"[SKIP] non-LS8/9 FC (platform={plat or 'unknown'}) for {args.tile} {date} -> {found_key}"
+                )
+                records.append(
+                    {
+                        "mode": "dates",
+                        "tile": args.tile,
+                        "year": year,
+                        "yearmonth": yearmonth,
+                        "date": date,
+                        "key": found_key,
+                        "filename": os.path.basename(found_key),
+                        "dest": str(
+                            (
+                                dest_root
+                                / (
+                                    args.tile
+                                    if "_" in args.tile
+                                    else f"{args.tile[:3]}_{args.tile[3:]}"
+                                )
+                                / year
+                                / yearmonth
+                            )
+                        ),
+                        "action": "SKIP-NON-LS8-9",
+                    }
+                )
                 continue
 
             # Destination folder: D:\data\lsat\PPP_RRR\YYYY\YYYYMM
-            pr_folder = args.tile if '_' in args.tile else f"{args.tile[:3]}_{args.tile[3:]}"
+            pr_folder = (
+                args.tile if "_" in args.tile else f"{args.tile[:3]}_{args.tile[3:]}"
+            )
             dest_dir = dest_root / pr_folder / year / yearmonth
             _ensure_dir(dest_dir)
 
@@ -572,71 +711,93 @@ def main(argv=None) -> int:
             if args.dry_run:
                 print(f"[HIT] {found_key} -> {dest_path}")
                 downloads += 1
-                records.append({
-                    "mode": "dates",
-                    "tile": args.tile,
-                    "year": year,
-                    "yearmonth": yearmonth,
-                    "date": date,
-                    "key": found_key,
-                    "filename": os.path.basename(found_key),
-                    "dest": str(dest_path),
-                    "action": "HIT (dry-run)",
-                })
+                records.append(
+                    {
+                        "mode": "dates",
+                        "tile": args.tile,
+                        "year": year,
+                        "yearmonth": yearmonth,
+                        "date": date,
+                        "key": found_key,
+                        "filename": os.path.basename(found_key),
+                        "dest": str(dest_path),
+                        "action": "HIT (dry-run)",
+                    }
+                )
                 continue
             # Handle existing file behaviour
             if dest_path.exists() and args.on_exists == "skip":
                 print(f"[SKIP] exists: {dest_path}")
-                records.append({
-                    "mode": "dates",
-                    "tile": args.tile,
-                    "year": year,
-                    "yearmonth": yearmonth,
-                    "date": date,
-                    "key": found_key,
-                    "filename": os.path.basename(found_key),
-                    "dest": str(dest_path),
-                    "action": "SKIP-EXISTS",
-                })
+                records.append(
+                    {
+                        "mode": "dates",
+                        "tile": args.tile,
+                        "year": year,
+                        "yearmonth": yearmonth,
+                        "date": date,
+                        "key": found_key,
+                        "filename": os.path.basename(found_key),
+                        "dest": str(dest_path),
+                        "action": "SKIP-EXISTS",
+                    }
+                )
                 continue
             try:
-                s3.download(found_key, str(dest_path), overwrite=(args.on_exists == "overwrite"))
+                s3.download(
+                    found_key, str(dest_path), overwrite=(args.on_exists == "overwrite")
+                )
                 print(f"[OK] {found_key} -> {dest_path}")
                 downloads += 1
-                records.append({
-                    "mode": "dates",
-                    "tile": args.tile,
-                    "year": year,
-                    "yearmonth": yearmonth,
-                    "date": date,
-                    "key": found_key,
-                    "filename": os.path.basename(found_key),
-                    "dest": str(dest_path),
-                    "action": "DOWNLOADED",
-                })
+                records.append(
+                    {
+                        "mode": "dates",
+                        "tile": args.tile,
+                        "year": year,
+                        "yearmonth": yearmonth,
+                        "date": date,
+                        "key": found_key,
+                        "filename": os.path.basename(found_key),
+                        "dest": str(dest_path),
+                        "action": "DOWNLOADED",
+                    }
+                )
             except Exception as e:
                 print(f"[ERR] download failed {found_key}: {e}")
-                records.append({
-                    "mode": "dates",
-                    "tile": args.tile,
-                    "year": year,
-                    "yearmonth": yearmonth,
-                    "date": date,
-                    "key": found_key,
-                    "filename": os.path.basename(found_key),
-                    "dest": str(dest_path),
-                    "action": f"ERROR: {e}",
-                })
+                records.append(
+                    {
+                        "mode": "dates",
+                        "tile": args.tile,
+                        "year": year,
+                        "yearmonth": yearmonth,
+                        "date": date,
+                        "key": found_key,
+                        "filename": os.path.basename(found_key),
+                        "dest": str(dest_path),
+                        "action": f"ERROR: {e}",
+                    }
+                )
 
     # Write CSV if requested
     if args.csv:
         out = Path(args.csv)
         out.parent.mkdir(parents=True, exist_ok=True)
         import csv
+
         with out.open("w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=[
-                "mode", "tile", "year", "yearmonth", "date", "key", "filename", "dest", "action"
-            ])
+            w = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "mode",
+                    "tile",
+                    "year",
+                    "yearmonth",
+                    "date",
+                    "key",
+                    "filename",
+                    "dest",
+                    "action",
+                ],
+            )
             w.writeheader()
             for r in records:
                 w.writerow(r)

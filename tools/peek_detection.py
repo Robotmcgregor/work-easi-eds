@@ -16,6 +16,7 @@ try:
     from src.database.connection import DatabaseManager
     from src.config.settings import get_config
     from src.database.nvms_models import NVMSDetection
+
     print("imports ok")
 except Exception as e:
     print("import error:\n" + traceback.format_exc())
@@ -28,15 +29,15 @@ def summarize_geom(val):
     if isinstance(val, (str, bytes, bytearray)):
         s = val.decode() if isinstance(val, (bytes, bytearray)) else val
         preview = s[:200]
-        kind = 'string'
+        kind = "string"
     elif isinstance(val, dict):
         preview = json.dumps(val)[:200]
-        kind = 'dict'
+        kind = "dict"
     else:
         try:
             preview = str(val)[:200]
         except Exception:
-            preview = '<unrepr>'
+            preview = "<unrepr>"
         kind = t
     return kind, preview
 
@@ -69,7 +70,8 @@ def main(ids):
             print(f"  geom preview: {prev}")
             print("-")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     if len(sys.argv) <= 1:
         print("Usage: py tools/peek_detection.py <id> [<id> ...]")
         sys.exit(1)

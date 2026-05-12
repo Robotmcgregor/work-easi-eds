@@ -2,6 +2,7 @@
 Minimal shim for QLD qv helpers used by edsadhoc_timeserieschange_d.py.
 We avoid any heavy data management; recallToHere is a no-op by default.
 """
+
 from __future__ import annotations
 
 from typing import Iterable, List

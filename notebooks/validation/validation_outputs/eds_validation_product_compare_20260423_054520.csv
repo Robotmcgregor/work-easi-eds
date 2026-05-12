@@ -1,0 +1,3 @@
+product,matched_pairs,tp,fn,fp,tn,recall,precision,specificity,accuracy,f1,errors
+dll,4,42,0,0,0,1.0,1.0,,1.0,1.0,0
+dlj,4,42,0,0,0,1.0,1.0,,1.0,1.0,0

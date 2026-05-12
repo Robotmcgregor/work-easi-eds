@@ -15,17 +15,28 @@ The EDS processing requires:
 ### Single Command Execution
 ```bash
 # Download all required data for a tile
-python scripts/eds_master_data_pipeline.py --tile 089_078 --start-date 20230720 --end-date 20240831
-
-# With custom parameters
-python scripts/eds_master_data_pipeline.py \
-  --tile 089_078 \
-  --start-date 20230720 \
-  --end-date 20240831 \
-  --dest "D:\data\lsat" \
+python /home/jovyan/work-easi-eds/scripts/easi-scripts/eds_lsat_collection/ls89_fc_sr_pipeline.py \
+  --tile-shp /home/jovyan/assets/eds_lsat_grid_min_max.shp \
+  --tile-id p089r078 \
   --span-years 10 \
-  --cloud-cover 40 \
-  --search-days 7
+  --run-download \
+  --download-start-date 2023-07-20 \
+  --download-end-date 2024-08-31 \
+
+
+# lzolre_p095r082_d2023040220231027_dlwm4
+# With custom parameters
+python /home/jovyan/work-easi-eds/scripts/easi-scripts/eds_lsat_collection/ls89_fc_sr_pipeline.py \
+  --tile-shp /home/jovyan/assets/eds_lsat_grid_min_max.shp \
+  --tile-id p095r082 \
+  --span-years 10 \
+  --run-download \
+  --download-start-date 2023-04-22 \
+  --download-end-date 2024-08-31 \
+  --dry-run
+
+  qld_nvms_run02/lzolre_p095r081_d2023040220231027_dlwm4
+
 ```
 
 ## Scripts Overview
@@ -48,7 +59,7 @@ python scripts/eds_master_data_pipeline.py \
 | `--end-date` | Required | End date in YYYYMMDD format (e.g., `20240831`) |
 | `--dest` | `D:\data\lsat` | Destination directory for downloaded data |
 | `--span-years` | `10` | Number of years of seasonal FC data to download |
-| `--cloud-cover` | `50` | Maximum cloud cover percentage to accept |
+| `--cloud-cover` | `40` | Maximum cloud cover percentage to accept |
 | `--search-days` | `7` | Days to search around target dates for SR composites |
 
 ## Data Sources Priority

@@ -14,16 +14,34 @@ import time
 import random
 from pathlib import Path
 import shutil
+
 # Create an anonymous S3 filesystem
 fs = s3fs.S3FileSystem(anon=True)
 
 # Band lists
-l57_bands = ['nbart_blue','nbart_green','nbart_red','nbart_nir','nbart_swir_1','nbart_swir_2']
-l89_bands = ['nbart_coastal_aerosol','nbart_blue','nbart_green','nbart_red','nbart_nir','nbart_swir_1','nbart_swir_2']
-oa = ['oa_fmask',] #'oa_combined_terrain_shadow']
+l57_bands = [
+    "nbart_blue",
+    "nbart_green",
+    "nbart_red",
+    "nbart_nir",
+    "nbart_swir_1",
+    "nbart_swir_2",
+]
+l89_bands = [
+    "nbart_coastal_aerosol",
+    "nbart_blue",
+    "nbart_green",
+    "nbart_red",
+    "nbart_nir",
+    "nbart_swir_1",
+    "nbart_swir_2",
+]
+oa = [
+    "oa_fmask",
+]  #'oa_combined_terrain_shadow']
 
 
-def download_file(url, output_path, chunk_size=1024*1024):
+def download_file(url, output_path, chunk_size=1024 * 1024):
     """Download a file from S3 or HTTPS to disk (streamed)."""
     dest = Path(output_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -66,11 +84,13 @@ def search_stac(collection, bbox, time_range, limit=1000):
         data = json.loads(url.read().decode())
     return data
 
+
 def make_dir(directory):
     """Create a directory if it doesn't exist."""
     if not os.path.exists(directory):
         os.makedirs(directory)
         print("directory created..", directory)
+
 
 def main(path, row, output_dir, cloud_threshold, target_date: str | None = None):
 
@@ -95,12 +115,7 @@ def main(path, row, output_dir, cloud_threshold, target_date: str | None = None)
     print(f"Searching date range: {time_range}")
 
     # Priority list
-    collections = [
-        "ga_ls9c_ard_3",
-        "ga_ls8c_ard_3",
-        "ga_ls5t_ard_3",
-        "ga_ls7e_ard_3"
-    ]
+    collections = ["ga_ls9c_ard_3", "ga_ls8c_ard_3", "ga_ls5t_ard_3", "ga_ls7e_ard_3"]
 
     dates_downloaded = set()
 
@@ -141,7 +156,9 @@ def main(path, row, output_dir, cloud_threshold, target_date: str | None = None)
                     continue
 
                 if date_str in dates_downloaded:
-                    print(f"Skipping {collection} scene on {date_str} — already downloaded from higher sensor.")
+                    print(
+                        f"Skipping {collection} scene on {date_str} — already downloaded from higher sensor."
+                    )
                     # date_str_clean = date_str_.replace("-", "")
                     # date_str_clean = ""
                     continue
@@ -171,7 +188,9 @@ def main(path, row, output_dir, cloud_threshold, target_date: str | None = None)
                 for dir_ in [pathrow_dir, year_dir, month_dir]:
                     make_dir(dir_)
 
-                print(f"Processing scene {stac_item['id']} with date {date_str} in {month_dir}")
+                print(
+                    f"Processing scene {stac_item['id']} with date {date_str} in {month_dir}"
+                )
                 print(f"Output directory: {month_dir}")
 
                 # --- decide expected SR name / band list by sensor ---
@@ -198,8 +217,8 @@ def main(path, row, output_dir, cloud_threshold, target_date: str | None = None)
 
                 # --- parse pieces for standardized names from DEA title ---
                 m = re.match(
-                    r'^(?P<prefix>ga_ls\d+c_ard)_3-2-1_(?P<pathrow>\d{6})_(?P<date>\d{4}-\d{2}-\d{2})(?:_(?P<tail>.+))?$',
-                    title
+                    r"^(?P<prefix>ga_ls\d+c_ard)_3-2-1_(?P<pathrow>\d{6})_(?P<date>\d{4}-\d{2}-\d{2})(?:_(?P<tail>.+))?$",
+                    title,
                 )
                 if m:
                     prefix = m.group("prefix")  # e.g. ga_ls9c_ard
@@ -228,19 +247,28 @@ def main(path, row, output_dir, cloud_threshold, target_date: str | None = None)
                 # standardized mask paths (we accept legacy as “exists”, but only write standardized)
                 std_fmask_path = os.path.join(month_dir, f"{base_std}_fmask.tif")
                 legacy_fmask = os.path.join(month_dir, f"{title}_fmask.tif")
-                fmask_exists = os.path.exists(std_fmask_path) or os.path.exists(legacy_fmask)
+                fmask_exists = os.path.exists(std_fmask_path) or os.path.exists(
+                    legacy_fmask
+                )
 
                 print("-" * 50)
                 print("Checking outputs in:", month_dir)
-                print(f"  SR product : srb6/srb7 -> {'exists' if sr_exists else 'missing'}")
-                print(f"  FMASK      : {os.path.basename(std_fmask_path)} -> {'exists' if fmask_exists else 'missing'}")
+                print(
+                    f"  SR product : srb6/srb7 -> {'exists' if sr_exists else 'missing'}"
+                )
+                print(
+                    f"  FMASK      : {os.path.basename(std_fmask_path)} -> {'exists' if fmask_exists else 'missing'}"
+                )
 
                 if sr_exists:
                     existing = next(p for p in sr_candidates if os.path.exists(p))
                     print(f"Skipping SR build — found existing: {existing}")
                 else:
                     # temp workspace
-                    temp_dir = os.path.join(r"C:\Users\RobMCGREGOR\projects\working\temp_image", stac_item["id"])
+                    temp_dir = os.path.join(
+                        r"C:\Users\RobMCGREGOR\projects\working\temp_image",
+                        stac_item["id"],
+                    )
                     make_dir(temp_dir)
                     cwd_before = os.getcwd()
                     try:
@@ -267,7 +295,9 @@ def main(path, row, output_dir, cloud_threshold, target_date: str | None = None)
                             meta.update(count=sr_count, compress="lzw")
 
                             with rasterio.open(sr_out_tmp, "w", **meta) as dst:
-                                for band_id, layer_file in enumerate(sorted(band_files), start=1):
+                                for band_id, layer_file in enumerate(
+                                    sorted(band_files), start=1
+                                ):
                                     with rasterio.open(layer_file) as src1:
                                         dst.write_band(band_id, src1.read(1))
                             print(f"✓ SR composite built: {sr_out_tmp}")
@@ -279,14 +309,20 @@ def main(path, row, output_dir, cloud_threshold, target_date: str | None = None)
                                 except Exception:
                                     pass
 
-                            final_sr_path = os.path.join(month_dir, os.path.basename(sr_out_tmp))
+                            final_sr_path = os.path.join(
+                                month_dir, os.path.basename(sr_out_tmp)
+                            )
                             if not os.path.exists(final_sr_path):
                                 shutil.copy(sr_out_tmp, final_sr_path)
                                 print(f"→ Copied SR to: {final_sr_path}")
                             else:
-                                print(f"→ SR already present at destination: {final_sr_path}")
+                                print(
+                                    f"→ SR already present at destination: {final_sr_path}"
+                                )
                         else:
-                            print("[WARN] No SR bands available in assets for this scene.")
+                            print(
+                                "[WARN] No SR bands available in assets for this scene."
+                            )
                     finally:
                         os.chdir(cwd_before)
 
@@ -294,10 +330,14 @@ def main(path, row, output_dir, cloud_threshold, target_date: str | None = None)
                 # Masks (write standardized names; accept legacy as already present)
                 # ---------------------------------------------------------------------
                 print("Mask outputs (standardized):")
-                print(f"  FMASK : {os.path.basename(std_fmask_path)} -> {'exists' if fmask_exists else 'missing'}")
+                print(
+                    f"  FMASK : {os.path.basename(std_fmask_path)} -> {'exists' if fmask_exists else 'missing'}"
+                )
 
                 if not fmask_exists and "oa_fmask" in stac_item["assets"]:
-                    download_file(stac_item["assets"]["oa_fmask"]["href"], std_fmask_path)
+                    download_file(
+                        stac_item["assets"]["oa_fmask"]["href"], std_fmask_path
+                    )
                 else:
                     print("FMASK present; skip download.")
                 #
@@ -352,9 +392,9 @@ def main(path, row, output_dir, cloud_threshold, target_date: str | None = None)
                 # else:
                 #     print("Combined terrain shadow present; skip download.")
 
-
     if not dates_downloaded:
         print("No data found in any Landsat collection for this tile.")
+
 
 if __name__ == "__main__":
     import argparse
@@ -363,35 +403,29 @@ if __name__ == "__main__":
         description="Download Landsat surface reflectance data from DEA STAC API."
     )
     parser.add_argument(
-        "--path",
-        type=str,
-        default="091",
-        help="Landsat WRS2 path (e.g. '090')"
+        "--path", type=str, default="091", help="Landsat WRS2 path (e.g. '090')"
     )
     parser.add_argument(
-        "--row",
-        type=str,
-        default="078",
-        help="Landsat WRS2 row (e.g. '084')"
+        "--row", type=str, default="078", help="Landsat WRS2 row (e.g. '084')"
     )
 
     parser.add_argument(
         "--output_dir",
         type=str,
         default=r"D:\projects\working\lsat",
-        help="Output directory for downloaded files"
+        help="Output directory for downloaded files",
     )
     parser.add_argument(
         "--cloud_threshold",
         type=float,
         default=10,
-        help="Maximum allowed cloud cover percentage (default = 10)"
+        help="Maximum allowed cloud cover percentage (default = 10)",
     )
     parser.add_argument(
         "--target_date",
         type=str,
         default=None,
-        help="Optional single date to download only (YYYY-MM-DD or YYYYMMDD)"
+        help="Optional single date to download only (YYYY-MM-DD or YYYYMMDD)",
     )
 
     args = parser.parse_args()

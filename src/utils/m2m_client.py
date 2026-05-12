@@ -7,6 +7,7 @@ Notes:
 - The M2M API returns an apiKey via /login which must be sent in 'X-Auth-Token' for subsequent calls.
 - Endpoints are subject to change; adjust if your account/docs specify different paths.
 """
+
 from __future__ import annotations
 
 import os
@@ -22,18 +23,24 @@ logger = logging.getLogger(__name__)
 
 
 class USGSM2MClient:
-    def __init__(self, username: str, password: Optional[str] = None, endpoint: str = "https://m2m.cr.usgs.gov/api/api/json/stable/", app_token: Optional[str] = None):
+    def __init__(
+        self,
+        username: str,
+        password: Optional[str] = None,
+        endpoint: str = "https://m2m.cr.usgs.gov/api/api/json/stable/",
+        app_token: Optional[str] = None,
+    ):
         self.username = username
         self.password = password or ""
         self.app_token = app_token or ""
-        self.endpoint = endpoint.rstrip('/') + '/'
+        self.endpoint = endpoint.rstrip("/") + "/"
         self.api_key: Optional[str] = None
 
     def _headers(self) -> Dict[str, str]:
         h = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "eds-m2m-client/1.0 (+https://example.org)"
+            "User-Agent": "eds-m2m-client/1.0 (+https://example.org)",
         }
         if self.api_key:
             h["X-Auth-Token"] = self.api_key
@@ -46,12 +53,12 @@ class USGSM2MClient:
         payload = {"username": self.username, "password": self.password}
         # Try known base URL variants in case the stable path changes or is proxied
         base_candidates = [
-            self.endpoint.rstrip('/') + '/login',
-            'https://m2m.cr.usgs.gov/api/api/json/stable/login',
-            'https://m2m.cr.usgs.gov/api/json/stable/login',
-            'https://m2m.cr.usgs.gov/api/stable/json/login',
-            'https://m2m.cr.usgs.gov/api/stable/login',
-            'https://m2m.cr.usgs.gov/api/login',
+            self.endpoint.rstrip("/") + "/login",
+            "https://m2m.cr.usgs.gov/api/api/json/stable/login",
+            "https://m2m.cr.usgs.gov/api/json/stable/login",
+            "https://m2m.cr.usgs.gov/api/stable/json/login",
+            "https://m2m.cr.usgs.gov/api/stable/login",
+            "https://m2m.cr.usgs.gov/api/login",
         ]
         # Deduplicate while preserving order
         candidates: List[str] = []
@@ -65,11 +72,19 @@ class USGSM2MClient:
         for url in candidates:
             try:
                 tried.append(url)
-                resp = requests.post(url, headers=self._headers(), json=payload, timeout=30, allow_redirects=False)
+                resp = requests.post(
+                    url,
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=30,
+                    allow_redirects=False,
+                )
                 # Surface redirects explicitly (corporate proxies or SSO sometimes redirect to HTML login)
                 if 300 <= resp.status_code < 400:
-                    loc = resp.headers.get('Location', '')
-                    raise RuntimeError(f"Redirect ({resp.status_code}) from {url} -> {loc}")
+                    loc = resp.headers.get("Location", "")
+                    raise RuntimeError(
+                        f"Redirect ({resp.status_code}) from {url} -> {loc}"
+                    )
                 if resp.status_code == 404:
                     last_err = Exception(f"404 at {url}")
                     continue
@@ -78,8 +93,10 @@ class USGSM2MClient:
                     data = resp.json()
                 except Exception as je:
                     # Include first 200 chars of body for diagnostics
-                    snippet = (resp.text or '')[:200]
-                    raise RuntimeError(f"Non-JSON response at {url}: {je}; body starts with: {snippet!r}")
+                    snippet = (resp.text or "")[:200]
+                    raise RuntimeError(
+                        f"Non-JSON response at {url}: {je}; body starts with: {snippet!r}"
+                    )
                 if not data.get("data"):
                     last_err = Exception(f"Login response missing data: {data}")
                     continue
@@ -94,20 +111,28 @@ class USGSM2MClient:
     def _login_with_token(self) -> str:
         payload = {"username": self.username, "token": self.app_token}
         candidates = [
-            self.endpoint.rstrip('/') + '/login-token',
-            'https://m2m.cr.usgs.gov/api/api/json/stable/login-token',
-            'https://m2m.cr.usgs.gov/api/json/stable/login-token',
-            'https://m2m.cr.usgs.gov/api/api/stable/login-token',
+            self.endpoint.rstrip("/") + "/login-token",
+            "https://m2m.cr.usgs.gov/api/api/json/stable/login-token",
+            "https://m2m.cr.usgs.gov/api/json/stable/login-token",
+            "https://m2m.cr.usgs.gov/api/api/stable/login-token",
         ]
         last_err: Optional[Exception] = None
         tried: List[str] = []
         for url in candidates:
             try:
                 tried.append(url)
-                resp = requests.post(url, headers=self._headers(), json=payload, timeout=30, allow_redirects=False)
+                resp = requests.post(
+                    url,
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=30,
+                    allow_redirects=False,
+                )
                 if 300 <= resp.status_code < 400:
-                    loc = resp.headers.get('Location', '')
-                    raise RuntimeError(f"Redirect ({resp.status_code}) from {url} -> {loc}")
+                    loc = resp.headers.get("Location", "")
+                    raise RuntimeError(
+                        f"Redirect ({resp.status_code}) from {url} -> {loc}"
+                    )
                 if resp.status_code == 404:
                     last_err = Exception(f"404 at {url}")
                     continue
@@ -115,8 +140,10 @@ class USGSM2MClient:
                 try:
                     data = resp.json()
                 except Exception as je:
-                    snippet = (resp.text or '')[:200]
-                    raise RuntimeError(f"Non-JSON response at {url}: {je}; body starts with: {snippet!r}")
+                    snippet = (resp.text or "")[:200]
+                    raise RuntimeError(
+                        f"Non-JSON response at {url}: {je}; body starts with: {snippet!r}"
+                    )
                 if not data.get("data"):
                     last_err = Exception(f"Login-token response missing data: {data}")
                     continue
@@ -132,20 +159,26 @@ class USGSM2MClient:
             self.app_token = self.app_token or ""
             payload_alt = {"username": self.username, "token": self.app_token}
             for url in [
-                self.endpoint.rstrip('/') + '/login',
-                'https://m2m.cr.usgs.gov/api/api/json/stable/login',
-                'https://m2m.cr.usgs.gov/api/json/stable/login',
+                self.endpoint.rstrip("/") + "/login",
+                "https://m2m.cr.usgs.gov/api/api/json/stable/login",
+                "https://m2m.cr.usgs.gov/api/json/stable/login",
             ]:
-                resp = requests.post(url, headers=self._headers(), json=payload_alt, timeout=30, allow_redirects=False)
+                resp = requests.post(
+                    url,
+                    headers=self._headers(),
+                    json=payload_alt,
+                    timeout=30,
+                    allow_redirects=False,
+                )
                 if 300 <= resp.status_code < 400:
-                    loc = resp.headers.get('Location', '')
+                    loc = resp.headers.get("Location", "")
                     continue
                 if resp.status_code == 404:
                     continue
                 resp.raise_for_status()
                 data = resp.json()
-                if data.get('data'):
-                    self.api_key = data['data']
+                if data.get("data"):
+                    self.api_key = data["data"]
                     return self.api_key
         except Exception:
             pass
@@ -160,7 +193,16 @@ class USGSM2MClient:
         finally:
             self.api_key = None
 
-    def search_scenes_wrs2(self, dataset: str, path: int, row: int, start: date, end: date, node: str = "EE", max_results: int = 100) -> List[Dict[str, Any]]:
+    def search_scenes_wrs2(
+        self,
+        dataset: str,
+        path: int,
+        row: int,
+        start: date,
+        end: date,
+        node: str = "EE",
+        max_results: int = 100,
+    ) -> List[Dict[str, Any]]:
         """Search scenes by WRS-2 path/row and date range.
         Returns a list of scenes (dicts as returned by M2M).
         """
@@ -175,7 +217,11 @@ class USGSM2MClient:
             "maxResults": max_results,
             "startingNumber": 1,
             "sortOrder": "DESC",
-            "resultOptions": {"maxResults": max_results, "startingNumber": 1, "sortOrder": "DESC"},
+            "resultOptions": {
+                "maxResults": max_results,
+                "startingNumber": 1,
+                "sortOrder": "DESC",
+            },
         }
         # Try with datasetName first, then fall back to datasetId (using provided dataset string as the id)
         for ft in filter_types:
@@ -187,13 +233,22 @@ class USGSM2MClient:
             ]
             scene_filters = []
             for spatial in spatial_variants:
-                scene_filters.append({
-                    "spatialFilter": spatial,
-                    # Acquisition dates belong in sceneFilter in many deployments
-                    "acquisitionFilter": {"start": start.strftime('%Y-%m-%d'), "end": end.strftime('%Y-%m-%d')},
-                    # Cloud cover filter; include unknown values
-                    "cloudCoverFilter": {"min": 0, "max": 100, "includeUnknown": True},
-                })
+                scene_filters.append(
+                    {
+                        "spatialFilter": spatial,
+                        # Acquisition dates belong in sceneFilter in many deployments
+                        "acquisitionFilter": {
+                            "start": start.strftime("%Y-%m-%d"),
+                            "end": end.strftime("%Y-%m-%d"),
+                        },
+                        # Cloud cover filter; include unknown values
+                        "cloudCoverFilter": {
+                            "min": 0,
+                            "max": 100,
+                            "includeUnknown": True,
+                        },
+                    }
+                )
             payloads = []
             for sf in scene_filters:
                 # Variant A: datasetName
@@ -208,16 +263,24 @@ class USGSM2MClient:
                 payloads.append(p_id)
                 # Variant C: temporalFilter at top-level (legacy), keep sceneFilter for spatial/cloud
                 p_name_top = dict(p_name)
-                p_name_top["temporalFilter"] = {"startDate": start.strftime('%Y-%m-%d'), "endDate": end.strftime('%Y-%m-%d')}
+                p_name_top["temporalFilter"] = {
+                    "startDate": start.strftime("%Y-%m-%d"),
+                    "endDate": end.strftime("%Y-%m-%d"),
+                }
                 payloads.append(p_name_top)
                 p_id_top = dict(p_id)
-                p_id_top["temporalFilter"] = {"startDate": start.strftime('%Y-%m-%d'), "endDate": end.strftime('%Y-%m-%d')}
+                p_id_top["temporalFilter"] = {
+                    "startDate": start.strftime("%Y-%m-%d"),
+                    "endDate": end.strftime("%Y-%m-%d"),
+                }
                 payloads.append(p_id_top)
 
             for payload in payloads:
                 for ep in ("search", "scene-search"):
                     url = self.endpoint + ep
-                    resp = requests.post(url, headers=self._headers(), json=payload, timeout=60)
+                    resp = requests.post(
+                        url, headers=self._headers(), json=payload, timeout=60
+                    )
                     if resp.status_code == 404:
                         continue
                     # Some payload variants may 400; skip to next variant
@@ -231,9 +294,13 @@ class USGSM2MClient:
                     if results:
                         return results or []
         return []
-        raise RuntimeError("USGS M2M search endpoints not available (search/scene-search).")
+        raise RuntimeError(
+            "USGS M2M search endpoints not available (search/scene-search)."
+        )
 
-    def get_download_options(self, dataset: str, entity_ids: List[str], node: str = "EE") -> List[Dict[str, Any]]:
+    def get_download_options(
+        self, dataset: str, entity_ids: List[str], node: str = "EE"
+    ) -> List[Dict[str, Any]]:
         if not self.api_key:
             self.login()
         url = self.endpoint + "download-options"
@@ -243,11 +310,17 @@ class USGSM2MClient:
         data = resp.json()
         return data.get("data", []) or []
 
-    def request_download(self, dataset: str, products: List[Dict[str, Any]], node: str = "EE") -> Dict[str, Any]:
+    def request_download(
+        self, dataset: str, products: List[Dict[str, Any]], node: str = "EE"
+    ) -> Dict[str, Any]:
         if not self.api_key:
             self.login()
         url = self.endpoint + "download"
-        payload = {"downloads": products, "label": "eds-download", "returnAvailable": True}
+        payload = {
+            "downloads": products,
+            "label": "eds-download",
+            "returnAvailable": True,
+        }
         resp = requests.post(url, headers=self._headers(), json=payload, timeout=60)
         resp.raise_for_status()
         return resp.json().get("data", {}) or {}
@@ -260,10 +333,10 @@ class USGSM2MClient:
             url = item.get("url")
             if not url:
                 continue
-            filename = os.path.join(dest_dir, os.path.basename(url.split('?')[0]))
+            filename = os.path.join(dest_dir, os.path.basename(url.split("?")[0]))
             with requests.get(url, stream=True) as r:
                 r.raise_for_status()
-                with open(filename, 'wb') as f:
+                with open(filename, "wb") as f:
                     for chunk in r.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             f.write(chunk)
@@ -292,7 +365,11 @@ class USGSM2MClient:
             "maxResults": max_results,
             "startingNumber": 1,
             "sortOrder": "DESC",
-            "resultOptions": {"maxResults": max_results, "startingNumber": 1, "sortOrder": "DESC"},
+            "resultOptions": {
+                "maxResults": max_results,
+                "startingNumber": 1,
+                "sortOrder": "DESC",
+            },
         }
         # Spatial variants: mbr/Mbr keys
         mbr_variants = [
@@ -311,23 +388,35 @@ class USGSM2MClient:
         for mbr in mbr_variants:
             scene_filter = {
                 "spatialFilter": mbr,
-                "acquisitionFilter": {"start": start.strftime('%Y-%m-%d'), "end": end.strftime('%Y-%m-%d')},
+                "acquisitionFilter": {
+                    "start": start.strftime("%Y-%m-%d"),
+                    "end": end.strftime("%Y-%m-%d"),
+                },
                 "cloudCoverFilter": {"min": 0, "max": 100, "includeUnknown": True},
             }
-            p_name = dict(base); p_name["datasetName"] = dataset; p_name["sceneFilter"] = scene_filter
+            p_name = dict(base)
+            p_name["datasetName"] = dataset
+            p_name["sceneFilter"] = scene_filter
             payloads.append(p_name)
-            p_id = dict(base); p_id["datasetId"] = dataset; p_id["sceneFilter"] = scene_filter
+            p_id = dict(base)
+            p_id["datasetId"] = dataset
+            p_id["sceneFilter"] = scene_filter
             payloads.append(p_id)
             # Also try temporalFilter at top-level
             for pl in (p_name, p_id):
                 p_top = dict(pl)
-                p_top["temporalFilter"] = {"startDate": start.strftime('%Y-%m-%d'), "endDate": end.strftime('%Y-%m-%d')}
+                p_top["temporalFilter"] = {
+                    "startDate": start.strftime("%Y-%m-%d"),
+                    "endDate": end.strftime("%Y-%m-%d"),
+                }
                 payloads.append(p_top)
 
         for payload in payloads:
             for ep in ("search", "scene-search"):
                 url = self.endpoint + ep
-                resp = requests.post(url, headers=self._headers(), json=payload, timeout=60)
+                resp = requests.post(
+                    url, headers=self._headers(), json=payload, timeout=60
+                )
                 if resp.status_code == 404:
                     continue
                 if resp.status_code >= 400:
@@ -341,11 +430,14 @@ class USGSM2MClient:
                     return results or []
         return []
 
-    def search_recent(self, dataset: str, days: int = 14, node: str = "EE", max_results: int = 50) -> List[Dict[str, Any]]:
+    def search_recent(
+        self, dataset: str, days: int = 14, node: str = "EE", max_results: int = 50
+    ) -> List[Dict[str, Any]]:
         """List recent scenes globally for a dataset without spatial constraints (best-effort).
         Uses the last N days as a temporal filter to reduce result size.
         """
         from datetime import timedelta, datetime as dt
+
         if not self.api_key:
             self.login()
         end = dt.utcnow().date()
@@ -355,18 +447,34 @@ class USGSM2MClient:
             "maxResults": max_results,
             "startingNumber": 1,
             "sortOrder": "DESC",
-            "resultOptions": {"maxResults": max_results, "startingNumber": 1, "sortOrder": "DESC"},
+            "resultOptions": {
+                "maxResults": max_results,
+                "startingNumber": 1,
+                "sortOrder": "DESC",
+            },
         }
         payloads: List[Dict[str, Any]] = []
         # datasetName and datasetId variants
-        p_name = dict(base); p_name["datasetName"] = dataset; p_name["temporalFilter"] = {"startDate": start.strftime('%Y-%m-%d'), "endDate": end.strftime('%Y-%m-%d')}
+        p_name = dict(base)
+        p_name["datasetName"] = dataset
+        p_name["temporalFilter"] = {
+            "startDate": start.strftime("%Y-%m-%d"),
+            "endDate": end.strftime("%Y-%m-%d"),
+        }
         payloads.append(p_name)
-        p_id = dict(base); p_id["datasetId"] = dataset; p_id["temporalFilter"] = {"startDate": start.strftime('%Y-%m-%d'), "endDate": end.strftime('%Y-%m-%d')}
+        p_id = dict(base)
+        p_id["datasetId"] = dataset
+        p_id["temporalFilter"] = {
+            "startDate": start.strftime("%Y-%m-%d"),
+            "endDate": end.strftime("%Y-%m-%d"),
+        }
         payloads.append(p_id)
         for payload in payloads:
             for ep in ("search", "scene-search"):
                 url = self.endpoint + ep
-                resp = requests.post(url, headers=self._headers(), json=payload, timeout=60)
+                resp = requests.post(
+                    url, headers=self._headers(), json=payload, timeout=60
+                )
                 if resp.status_code == 404:
                     continue
                 if resp.status_code >= 400:
