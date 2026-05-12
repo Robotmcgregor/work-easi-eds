@@ -50,6 +50,7 @@ from tasks.task05_run_legacy_method import run_legacy_ndvi_window
 from tasks.task06_convert_and_upload_outputs import convert_outputs_to_cog_and_upload
 from tasks.task07_stage_ga1_locally import stage_ga1_ndvi_locally
 from tasks.task08_masks_and_vectors import make_masks_and_vectors
+from lib.s3_io import upload_file_to_s3
 
 
 def parse_args():
@@ -175,6 +176,37 @@ def parse_args():
     )
 
     return ap.parse_args()
+
+
+def _upload_run_diagnostics_to_s3(
+    *,
+    diagnostics_dir: Path,
+    bucket: str,
+    s3_prefix: str,
+    tile: str,
+    run_tag: str,
+) -> list[str]:
+    """Upload all diagnostic artefacts for a run to S3.
+
+    Destination layout (kept separate from primary outputs):
+      {s3_prefix}/diagnostics/tiles/{tile}/outputs/{run_tag}/...
+    """
+    diagnostics_dir = Path(diagnostics_dir)
+    if not diagnostics_dir.exists():
+        return []
+
+    uploaded: list[str] = []
+    base = f"{s3_prefix.rstrip('/')}/diagnostics/tiles/{tile}/outputs/{run_tag}"
+
+    for p in sorted(diagnostics_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(diagnostics_dir).as_posix()
+        key = f"{base}/{rel}"
+        upload_file_to_s3(str(p), bucket=bucket, key=key)
+        uploaded.append(f"s3://{bucket}/{key}")
+
+    return uploaded
 
 
 def _print_raster_stats(path: Path, label: str) -> None:
@@ -674,6 +706,23 @@ def main():
     print(f'[OK] Clear  mask -> s3://{args.s3_bucket}/{mv.clear_mask_s3}')
     print(f'[OK] Strong SHP  -> s3://{args.s3_bucket}/{mv.strong_shp_s3_prefix}/')
     print(f'[OK] Clear  SHP  -> s3://{args.s3_bucket}/{mv.clear_shp_s3_prefix}/')
+
+    # ------------------------------------------------------------------
+    # STEP 8b: Upload any diagnostics artefacts to S3 (separate prefix).
+    # This keeps primary outputs under .../tiles/{tile}/outputs/{run_tag}/
+    # while storing diagnostics under .../diagnostics/tiles/{tile}/outputs/{run_tag}/
+    # ------------------------------------------------------------------
+    if bool(args.diagnostics) and (not bool(args.dry_run)):
+        uploaded_diags = _upload_run_diagnostics_to_s3(
+            diagnostics_dir=paths.diagnostics,
+            bucket=args.s3_bucket,
+            s3_prefix=args.s3_prefix,
+            tile=tile,
+            run_tag=run_tag,
+        )
+        if uploaded_diags:
+            print(f"[OK] Uploaded {len(uploaded_diags)} diagnostics artefacts to S3")
+            print(f"[OK] Diagnostics S3 prefix: s3://{args.s3_bucket}/{args.s3_prefix.rstrip('/')}/diagnostics/tiles/{tile}/outputs/{run_tag}/")
 
     if bool(args.copy_to_home):
         from tasks.task09_copy_run_to_home import copy_run_to_home

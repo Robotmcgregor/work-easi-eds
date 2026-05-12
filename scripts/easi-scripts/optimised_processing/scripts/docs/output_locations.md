@@ -164,10 +164,18 @@ When you pass `--diagnostics` to the pipeline, it passes `--diagnostics` through
 
 - legacy `--diagnostics-dir` = `{run_root}/diagnostics/`
 
+The pipeline also uploads the resulting diagnostics artefacts to S3 under a dedicated prefix (kept separate from the main run outputs):
+
+- `{s3_prefix}/diagnostics/tiles/{tile}/outputs/{run_tag}/...`
+
 ### Legacy diagnostic rasters
 
 - `{run_root}/diagnostics/{platform}olre_{tile}_d{start_yyyymmdd}{end_yyyymmdd}_combined_raw_e{epsg}.tif`
   - float32, NoData = `-9999` (masked pixels)
+
+S3 key (uploaded by the pipeline):
+
+- `{s3_prefix}/diagnostics/tiles/{tile}/outputs/{run_tag}/{platform}olre_{tile}_d{start_yyyymmdd}{end_yyyymmdd}_combined_raw_e{epsg}.tif`
 
 ### Legacy diagnostic CSV/JSON/PNG files
 
@@ -184,6 +192,15 @@ Files written into `{run_root}/diagnostics/`:
 - `{diag_name}_summary.csv`
 - `{diag_name}_sr_scale_verify.csv`
 - `{diag_name}_ndviDiffStdErr.png` (only if `matplotlib` is available and diagnostics dir is local)
+
+S3 keys (uploaded by the pipeline):
+
+- `{s3_prefix}/diagnostics/tiles/{tile}/outputs/{run_tag}/{diag_name}_ndviDiffStdErr_stats.csv`
+- `{s3_prefix}/diagnostics/tiles/{tile}/outputs/{run_tag}/{diag_name}_ndviDiffStdErr_bins.csv`
+- `{s3_prefix}/diagnostics/tiles/{tile}/outputs/{run_tag}/{diag_name}_runmeta.json`
+- `{s3_prefix}/diagnostics/tiles/{tile}/outputs/{run_tag}/{diag_name}_summary.csv`
+- `{s3_prefix}/diagnostics/tiles/{tile}/outputs/{run_tag}/{diag_name}_sr_scale_verify.csv`
+- `{s3_prefix}/diagnostics/tiles/{tile}/outputs/{run_tag}/{diag_name}_ndviDiffStdErr.png`
 
 ---
 
