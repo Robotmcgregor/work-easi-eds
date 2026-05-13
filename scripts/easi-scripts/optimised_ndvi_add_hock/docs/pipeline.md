@@ -6,17 +6,12 @@ Entry point: `scripts/ndvi_master_pipeline.py`.
 
 1. **Parse CLI args** (tile, S3 destination, local work dir, optional filtering).
 2. **Inventory existing outputs** in S3 (best-effort) so resume is faster.
-3. **Build a scene list** (in-memory) for the tile.
-4. **Select an effective date window**:
-  - If `--start-date` is omitted, resume from the next available scene date after the last **successful** run for this tile (from the run log).
-  - If `--end-date` is omitted, use the latest available scene date found in the datacube query.
-5. **For each manifest row (scene)**:
+3. **Load/build a scene manifest** (Parquet) for the tile.
+4. **For each manifest row (scene)**:
    - Build the S3 output keys (NDVI + ffmask).
    - If not `--rebase`, skip if both keys already exist in S3.
    - Load the scene from datacube, compute NDVI + mask, write COGs locally.
    - Upload both COGs to S3.
-6. **Record the run** to a master Parquet run log (status + timestamps + counts).
-7. **(Optional) Run EDS after NDVI** if `--run-eds-after` is set.
 
 ## Step details
 
@@ -28,26 +23,18 @@ Code: `tasks/task01_inventory_s3.py`.
 
 Note: the inventory prefix in `inventory_existing_outputs()` is currently different from the per-scene output key structure produced by the master pipeline. Treat the inventory count as informational; the definitive skip check is `s3_key_exists()` for the exact keys.
 
-### 2) Build scene list (in-memory)
+### 2) Build/load manifest (Parquet)
 Code: `tasks/task02_build_scene_manifest.py`.
 
-- The scene list is built by querying datacube datasets intersecting the tile bbox.
-- The NDVI pipeline does **not** persist a parquet manifest.
-- The authoritative per-run manifest parquet is written by the EDS pipeline.
+- The manifest is cached locally at:
+  - `--work-dir/<tile>/manifests/<tile>_manifest.parquet` (the pipeline uses `Path(--work-dir) / <tile>`)
+- If `--manifest-uri` is an S3 URI and it exists, it is downloaded and used.
+- Otherwise it is built by querying datacube datasets intersecting the tile bbox.
 
 Filtering rules:
 
 - **Strict** scene-level cloud filter: only scenes with cloud metadata and `cloud <= --cloud-max` are included.
 - Optional date window: `--start-date` / `--end-date` are applied after loading/building.
-
-### 3) Run log (Parquet)
-
-The master pipeline records runs in a master Parquet file (no database required).
-
-- Default location (if `--run-log-uri` is not provided):
-  - `s3://<bucket>/<prefix>/runs/optimised_ndvi_runs.parquet`
-
-Only `status == "success"` entries are used for auto-resume start-date selection.
 
 Tile bounds source:
 

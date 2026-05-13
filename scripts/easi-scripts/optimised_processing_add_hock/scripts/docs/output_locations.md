@@ -55,10 +55,6 @@ Subfolders (created every run):
 - `{run_root}/maskvec_work/` (masks + vectors)
 - `{run_root}/diagnostics/` (diagnostics files; also used as legacy `--diagnostics-dir`)
 
-Run-scoped parquet written by the pipeline (authoritative record of what the run used):
-
-- `{run_root}/run_manifest.parquet`
-
 Optional subfolder (only if `--export-sr-raw-cog`):
 
 - `{run_root}/sr_raw_cog/` (or whatever `--export-sr-raw-cog-dirname` is set to)
@@ -66,28 +62,6 @@ Optional subfolder (only if `--export-sr-raw-cog`):
 ---
 
 ## Normal outputs (always produced)
-
-### 0) Run recording outputs (authoritative)
-
-These are the “recorded” artefacts that describe **exactly** what the run used.
-
-Master run log parquet:
-
-- Default location (if `--run-log-uri` is omitted):
-  - `s3://{s3_bucket}/{s3_prefix}/runs/optimised_eds_runs.parquet`
-- If `--run-log-uri` is provided, it can be either:
-  - `s3://...` (uploaded)
-  - a local file path (written locally)
-
-Run manifest parquet (baseline plan + SR picks):
-
-- Local staging file (always written best-effort):
-  - `{run_root}/run_manifest.parquet`
-- Default destination (if `--run-manifest-uri` is omitted):
-  - `s3://{s3_bucket}/{s3_prefix}/runs/manifests/{tile}/{run_tag}_manifest.parquet`
-- If `--run-manifest-uri` is provided, it can be either:
-  - `s3://...` (uploaded)
-  - a local file path (moved/written locally)
 
 ### 1) GA1 NDVI scenes in S3 (baseline time-series)
 

@@ -6,10 +6,14 @@ from typing import List
 import pandas as pd
 import numpy as np
 
+from lib.s3_io import s3_uri_exists, download_s3_uri, upload_file_to_s3, parse_s3_uri
 from lib.tile_grid import (
     load_tile_bbox_wgs84,
     derive_target_epsg_wgs84_utm_from_lonlat,
 )
+
+
+from lib.cog import ensure_pyarrow
 
 
 REQUIRED_COLS = [
@@ -20,27 +24,53 @@ REQUIRED_COLS = [
 
 def load_or_build_manifest(
     tile: str,
+    manifest_uri: str,
     tile_shp: str,
     products: List[str],
     cloud_max: float,
     start_date: str | None,
     end_date: str | None,
+    work_dir: str,
     target_epsg: int,
 ) -> pd.DataFrame:
     """
-    Build an in-memory manifest by querying datacube datasets intersecting the tile.
+    Manifest is Parquet (local cache + optionally stored in S3).
 
-    NDVI no longer persists a parquet manifest to S3/local disk. The authoritative
-    manifest is written by the EDS pipeline.
+    If it exists: load it.
+    If not: build it by querying datacube datasets intersecting the tile geometry.
 
     NOTE: Filtering is STRICTLY by scene-level cloud metadata (cloud <= cloud_max).
         Scenes missing cloud metadata are skipped.
     """
 
+    # make sure pyarrow is available before doing parquet stuff
+    ensure_pyarrow()
+
     # normalise tile name
     tile = tile.lower()
 
-    # build from datacube dataset search (bbox-based)
+    # set up local path to directory for manifests
+    cache_dir = Path(work_dir) / "manifests"
+
+    # create the directory if it doesn’t exist
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # local parquet file path for this tile
+    local_cache = cache_dir / f"{tile}_manifest.parquet"
+
+    # 1) load if exists
+    if manifest_uri.startswith("s3://"):
+        if s3_uri_exists(manifest_uri):
+            download_s3_uri(manifest_uri, str(local_cache))
+            df = pd.read_parquet(str(local_cache))
+            return _finalise(df, start_date, end_date)
+    else:
+        p = Path(manifest_uri)
+        if p.exists():
+            df = pd.read_parquet(str(p))
+            return _finalise(df, start_date, end_date)
+
+    # 2) build from datacube dataset search (bbox-based)
     lon_min, lat_min, lon_max, lat_max = load_tile_bbox_wgs84(tile_shp=tile_shp, tile=tile)
 
     # derive WGS84 UTM zone from bbox centre (unless forced target_epsg)
@@ -53,7 +83,7 @@ def load_or_build_manifest(
     # import sys
     # sys.exit("forced stop epsg")
 
-    df_full = build_manifest_from_datacube_bbox(
+    df = build_manifest_from_datacube_bbox(
         tile=tile,
         lon_min=lon_min,
         lat_min=lat_min,
@@ -64,8 +94,21 @@ def load_or_build_manifest(
         cloud_max=float(cloud_max),
     )
 
-    # Apply requested start/end filters for the dataframe we return.
-    return _finalise(df_full, start_date, end_date)
+    df = _finalise(df, start_date, end_date)
+
+
+    # 3) write data to parquet
+    df.to_parquet(str(local_cache), index=False)
+
+    if manifest_uri.startswith("s3://"):
+        b, k = parse_s3_uri(manifest_uri)
+        upload_file_to_s3(local_path=str(local_cache), bucket=b, key=k)
+        print(f"[OK] Manifest uploaded -> s3://{b}/{k}")
+    else:
+        Path(manifest_uri).parent.mkdir(parents=True, exist_ok=True)
+        Path(str(local_cache)).replace(manifest_uri)
+
+    return df
 
 
 

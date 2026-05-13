@@ -18,6 +18,11 @@ Variables used below:
 
 ## Local filesystem outputs
 
+### Manifest cache
+Written by `tasks/task02_build_scene_manifest.py`:
+
+- `${tile_work_dir}/manifests/${tile}_manifest.parquet`
+
 ### Per-scene temporary COGs
 Written by `tasks/task03_process_scene_ndvi.py`:
 
@@ -32,7 +37,15 @@ Cleanup behaviour:
 
 ## S3 outputs
 
-Note: the NDVI pipeline no longer writes a cached manifest parquet. The persistent, auditable per-run manifest is written by the EDS pipeline.
+### Manifest parquet
+Default location if `--manifest-uri` is not provided:
+
+- `s3://${bucket}/${prefix}/manifests/${tile}_manifest.parquet`
+
+If `--manifest-uri` is provided:
+
+- The manifest is **read from** that URI if it exists.
+- If it does not exist, it is **written to** that URI.
 
 ### Per-scene NDVI + FFMASK COGs
 Written by `scripts/ndvi_master_pipeline.py` + `tasks/task03_process_scene_ndvi.py`.
@@ -52,12 +65,3 @@ Skip/overwrite behaviour:
 
 - Default is **resume**: if both keys exist in S3, the scene is skipped.
 - `--rebase` forces reprocessing/upload.
-
-### Run log parquet (master)
-Written by `scripts/ndvi_master_pipeline.py`.
-
-Default location (if `--run-log-uri` is not provided):
-
-- `s3://${bucket}/${prefix}/runs/optimised_ndvi_runs.parquet`
-
-This file records each tile run (window start/end dates, status, start/finish timestamps, and counts).
