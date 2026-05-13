@@ -10,7 +10,6 @@ These docs describe the pipeline under `scripts/easi-scripts/optimised_processin
 ## Documents
 
 - [Pipeline overview](pipeline.md)
-- [CLI flags reference](cli.md)
 - [DLL/DLJ outputs (formats, naming, derivation)](outputs_dll_dlj.md)
 - [DLJ bands reference (what each band means)](dlj_bands.md)
 - [Clearing probability thresholds (strong/clear)](clearing_probability_thresholds.md)
@@ -20,13 +19,6 @@ These docs describe the pipeline under `scripts/easi-scripts/optimised_processin
 ## Note on “legacy” flags
 
 Even though the pipeline exposes `--legacy-*` flags, the default behavior (no legacy flags) enables SR auto-scaling and nodata-aware baseline stats, which often produces the best results. See [Troubleshooting & diagnostics](troubleshooting.md) for details.
-
-## Running after NDVI (optional)
-
-If you're starting from the optimised NDVI pipeline, you can chain this EDS pipeline automatically by running NDVI with `--run-eds-after`.
-
-- NDVI docs (including chaining example): [`optimised_ndvi/docs/README.md`](../../../optimised_ndvi/docs/README.md)
-- EDS chaining details: see the [Pipeline overview](pipeline.md#running-eds-after-ndvi-chained)
 
 ## Glossary (quick)
 

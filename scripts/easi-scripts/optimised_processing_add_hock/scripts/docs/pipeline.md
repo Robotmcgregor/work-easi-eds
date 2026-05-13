@@ -10,11 +10,6 @@ It is designed to be:
 - **Cloud-friendly**: intermediate products are stored in S3; final outputs are Cloud Optimised GeoTIFFs (COGs).
 - **Legacy-compatible**: the core clearing logic is implemented in a legacy-style method that produces DLL/DLJ rasters used by downstream QA tooling.
 
-It also **records** each run via:
-
-- a master **run log** parquet (`--run-log-uri`)
-- a per-run **run manifest** parquet (`--run-manifest-uri`) containing the seasonal NDVI baseline plan and SR picks
-
 ## Inputs (high level)
 
 - Tile: `p###r###` (e.g. `p115r078`)
@@ -155,32 +150,3 @@ python eds_master_pipeline_optimised.py \
 ```
 
 See `--help` on the script for all flags.
-
-For a human-friendly description of every flag, see [CLI flags reference](cli.md).
-
-## Running EDS after NDVI (chained)
-
-You can run EDS directly (recommended for most cases), but if you are already running the optimised NDVI pipeline you can optionally chain EDS automatically.
-
-From the NDVI pipeline, add `--run-eds-after`:
-
-```bash
-python scripts/easi-scripts/optimised_ndvi/scripts/ndvi_master_pipeline.py \
-  --tile p115r078 \
-  --s3-bucket <bucket> \
-  --s3-prefix <prefix> \
-  --work-dir <local-work-dir> \
-  --tile-shp <tile-shp> \
-  --run-eds-after
-```
-
-Behavior:
-
-- NDVI runs first (writing GA1 NDVI + GA2 FFMASK to S3).
-- EDS is then invoked for the same tile and the **effective** start/end dates used by that NDVI run.
-- EDS still builds its own seasonal baseline plan and **ensures all required GA1/GA2 scenes exist in S3** (computing any missing ones as needed).
-- The EDS run is recorded via `--run-log-uri` and `--run-manifest-uri`.
-
-Advanced:
-
-- Use NDVI `--eds-script <path>` to override which EDS entrypoint gets called.
