@@ -323,8 +323,27 @@ def _build_seasonal_baseline_df(
 
 def _default_eds_script_path() -> Path:
     # ndvi_master_pipeline.py is under: scripts/easi-scripts/optimised_ndvi/scripts/
-    easi_scripts_dir = Path(__file__).resolve().parents[3]
-    return easi_scripts_dir / "optimised_processing" / "scripts" / "eds_master_pipeline_optimised.py"
+    # We want: <repo>/scripts/easi-scripts/optimised_processing/scripts/eds_master_pipeline_optimised.py
+    # __file__ parents:
+    #   0: .../optimised_ndvi/scripts
+    #   1: .../optimised_ndvi
+    #   2: .../easi-scripts
+    #   3: .../scripts
+    #   4: <repo>
+    easi_scripts_dir = Path(__file__).resolve().parents[2]
+    candidate = easi_scripts_dir / "optimised_processing" / "scripts" / "eds_master_pipeline_optimised.py"
+    if candidate.exists():
+        return candidate
+
+    # Fallback: search upwards for the expected scripts/easi-scripts root.
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        alt = parent / "scripts" / "easi-scripts" / "optimised_processing" / "scripts" / "eds_master_pipeline_optimised.py"
+        if alt.exists():
+            return alt
+
+    # Return the primary candidate even if missing so caller can error with a useful path.
+    return candidate
 
 
 def _run_eds_pipeline(
