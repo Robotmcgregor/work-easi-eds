@@ -50,6 +50,13 @@ python scripts/easi-scripts/optimised_ndvi/scripts/ndvi_master_pipeline.py \
 	--end-date 2014-12-31
 ```
 
+Note:
+
+- `--start-date`/`--end-date` define the *effective change window*.
+- The NDVI stage will also ensure the *seasonal baseline* exists in S3, matching the EDS logic:
+  - Seasonal window = (start − 2 months) → (end + 2 months)
+  - Baseline lookback = `--lookback` years (default 10)
+
 2) Scheduled/incremental run (recommended): omit dates
 
 - Uses the run log to resume from the next available date after the last successful run.
