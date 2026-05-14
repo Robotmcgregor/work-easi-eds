@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import math
 import re
-import geopandas as gpd
-import math
+
 
 def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
     """
@@ -46,6 +45,13 @@ def load_tile_bbox_wgs84(tile_shp: str, tile: str) -> tuple[float, float, float,
     p = int(m.group(1))
     r = int(m.group(2))
 
+    try:
+        import geopandas as gpd  # type: ignore
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "geopandas is required to read the tile shapefile. Install geopandas or run in the Jupyter environment."
+        ) from e
+
     gdf = gpd.read_file(tile_shp)
 
     if "path" not in gdf.columns or "row" not in gdf.columns:
@@ -82,6 +88,13 @@ def load_tile_geometry_wgs84(tile_shp: str, tile: str):
     tile = tile.lower().strip()
 
     # load the shapefile
+    try:
+        import geopandas as gpd  # type: ignore
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "geopandas is required to read the tile shapefile. Install geopandas or run in the Jupyter environment."
+        ) from e
+
     gdf = gpd.read_file(tile_shp)
 
     # ---------- case A: tile is like p###r### ----------
@@ -155,10 +168,6 @@ def load_tile_geometry_wgs84(tile_shp: str, tile: str):
 
     return geom
 
-
-
-
-import math
 
 # # ---------------------------------------------------------------------
 # # Backwards compatibility

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import geopandas as gpd
 import re
 from pathlib import Path
 from typing import List
