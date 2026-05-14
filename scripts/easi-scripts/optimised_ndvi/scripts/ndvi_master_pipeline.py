@@ -80,6 +80,30 @@ def parse_args():
     ap.add_argument("--limit", type=int, default=0, help="Process only first N scenes (0 = no limit)")
     ap.add_argument("--dry-run", action="store_true")
 
+    ap.add_argument(
+        "--lookback",
+        type=int,
+        default=10,
+        help=(
+            "When chaining to EDS (--run-eds-after): years of baseline lookback (default 10). "
+            "Ignored by the NDVI stage."
+        ),
+    )
+    ap.add_argument(
+        "--verbose",
+        action="store_true",
+        help=(
+            "Verbose logging. When chaining to EDS (--run-eds-after), forwards --verbose to EDS."
+        ),
+    )
+    ap.add_argument(
+        "--copy-to-home",
+        action="store_true",
+        help=(
+            "When chaining to EDS (--run-eds-after), forwards --copy-to-home to EDS (copies outputs under /home/jovyan)."
+        ),
+    )
+
     # Dask chunking (keeps it cheap)
     ap.add_argument("--chunk", type=int, default=2048, help="Dask chunk size for x/y (default 2048)")
 
@@ -273,12 +297,18 @@ def _run_eds_pipeline(
         str(args.resolution),
         "--chunk",
         str(args.chunk),
+        "--lookback",
+        str(int(args.lookback)),
     ]
 
     if args.rebase:
         cmd.append("--rebase")
     if args.dry_run:
         cmd.append("--dry-run")
+    if args.verbose:
+        cmd.append("--verbose")
+    if args.copy_to_home:
+        cmd.append("--copy-to-home")
 
     print("[INFO] Running EDS pipeline after NDVI:")
     print("       " + " ".join(cmd))
@@ -389,8 +419,9 @@ def main():
 
         manifest_df["target_epsg"] = manifest_df.apply(_resolve_row_epsg_series, axis=1)
 
-    print("[DEBUG] manifest cols:", list(manifest_df.columns))
-    print(manifest_df.head(1).to_dict("records"))
+    if args.verbose:
+        print("[DEBUG] manifest cols:", list(manifest_df.columns))
+        print(manifest_df.head(1).to_dict("records"))
 
     # Compute normalised date string column used for window selection/filtering.
     manifest_df = manifest_df.copy()
