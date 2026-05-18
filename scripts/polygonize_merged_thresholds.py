@@ -89,14 +89,34 @@ def polygonize_mask(
     )
     orig = mem_lyr.GetFeatureCount()
 
-    drv = ogr.GetDriverByName("ESRI Shapefile")
-    if out_path.exists():
-        drv.DeleteDataSource(str(out_path))
-    out_ds = drv.CreateDataSource(str(out_path))
-    out_lyr = out_ds.CreateLayer("polygons", srs=srs, geom_type=ogr.wkbPolygon)
-    out_lyr.CreateField(ogr.FieldDefn("thr", ogr.OFTInteger))
-    out_lyr.CreateField(ogr.FieldDefn("area_m2", ogr.OFTReal))
-    out_lyr.CreateField(ogr.FieldDefn("area_ha", ogr.OFTReal))
+    # Write both Shapefile and GeoPackage for downstream convenience.
+    out_specs = [
+        ("ESRI Shapefile", out_path, "polygons"),
+        ("GPKG", out_path.with_suffix(".gpkg"), "polygons"),
+    ]
+    out_datasets: list[ogr.DataSource] = []
+    out_layers: list[ogr.Layer] = []
+    for drv_name, dst_path, layer_name in out_specs:
+        drv = ogr.GetDriverByName(drv_name)
+        if drv is None:
+            raise SystemExit(f"OGR driver not available: {drv_name}")
+        if dst_path.exists():
+            try:
+                drv.DeleteDataSource(str(dst_path))
+            except Exception:
+                try:
+                    dst_path.unlink()
+                except Exception:
+                    pass
+        ds_out = drv.CreateDataSource(str(dst_path))
+        if ds_out is None:
+            raise SystemExit(f"Failed to create output: {dst_path}")
+        lyr_out = ds_out.CreateLayer(layer_name, srs=srs, geom_type=ogr.wkbPolygon)
+        lyr_out.CreateField(ogr.FieldDefn("thr", ogr.OFTInteger))
+        lyr_out.CreateField(ogr.FieldDefn("area_m2", ogr.OFTReal))
+        lyr_out.CreateField(ogr.FieldDefn("area_ha", ogr.OFTReal))
+        out_datasets.append(ds_out)
+        out_layers.append(lyr_out)
 
     pixel_area = _get_pixel_area_m2(gt)
     needs_reproj = _needs_reproject_for_area(srs)
@@ -123,16 +143,18 @@ def polygonize_mask(
         area_ha = area_m2 / 10000.0
         if min_ha is not None and area_ha < min_ha:
             continue
-        out_feat = ogr.Feature(out_lyr.GetLayerDefn())
-        out_feat.SetField("thr", int(out_path.stem.split("_")[-1]))
-        out_feat.SetField("area_m2", float(area_m2))
-        out_feat.SetField("area_ha", float(area_ha))
-        out_feat.SetGeometry(geom.Clone())
-        out_lyr.CreateFeature(out_feat)
-        out_feat = None
+        for out_lyr in out_layers:
+            out_feat = ogr.Feature(out_lyr.GetLayerDefn())
+            out_feat.SetField("thr", int(out_path.stem.split("_")[-1]))
+            out_feat.SetField("area_m2", float(area_m2))
+            out_feat.SetField("area_ha", float(area_ha))
+            out_feat.SetGeometry(geom.Clone())
+            out_lyr.CreateFeature(out_feat)
+            out_feat = None
         kept += 1
 
-    out_ds = None
+    out_layers = []
+    out_datasets = []
     mem_ds = None
     ds_val = None
     ds_msk = None

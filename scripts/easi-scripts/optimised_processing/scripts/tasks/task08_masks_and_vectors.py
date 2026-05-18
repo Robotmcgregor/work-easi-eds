@@ -110,6 +110,23 @@ def _write_shapefile_set(gdf: gpd.GeoDataFrame, out_dir: Path, stem: str) -> Pat
     shp_path = out_dir / f"{stem}.shp"
     # ESRI Shapefile driver creates the sidecar files automatically
     gdf.to_file(shp_path, driver="ESRI Shapefile")
+
+    # Also write a single-file GeoPackage for easier downstream use.
+    gpkg_path = out_dir / f"{stem}.gpkg"
+    try:
+        try:
+            gpkg_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        # Some Fiona/GeoPandas versions require/accept `layer`, others ignore it.
+        try:
+            gdf.to_file(gpkg_path, driver="GPKG", layer=str(stem))
+        except TypeError:
+            gdf.to_file(gpkg_path, driver="GPKG")
+    except Exception as e:
+        print(f"[WARN] Failed to write GeoPackage: {gpkg_path} ({e})")
+
     return shp_path
 
 

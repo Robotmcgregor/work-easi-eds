@@ -93,12 +93,33 @@ def clip_file(in_path: Path, clip_ds: ogr.DataSource, out_dir: Path) -> None:
     clip_union = _union_layer_polygons(clip_lyr)
     clip_union = _ensure_same_srs(clip_union, clip_srs, in_srs)
 
-    drv = ogr.GetDriverByName("ESRI Shapefile")
-    out_path = out_dir / in_path.name
-    if out_path.exists():
-        drv.DeleteDataSource(str(out_path))
-    out_ds = drv.CreateDataSource(str(out_path))
-    out_lyr = out_ds.CreateLayer("polygons", srs=in_srs, geom_type=ogr.wkbPolygon)
+    out_shp = out_dir / in_path.name
+    out_gpkg = out_dir / f"{in_path.stem}.gpkg"
+
+    out_specs = [
+        ("ESRI Shapefile", out_shp, "polygons"),
+        ("GPKG", out_gpkg, "polygons"),
+    ]
+    out_datasets: List[ogr.DataSource] = []
+    out_layers: List[ogr.Layer] = []
+    for drv_name, dst_path, layer_name in out_specs:
+        drv = ogr.GetDriverByName(drv_name)
+        if drv is None:
+            raise SystemExit(f"OGR driver not available: {drv_name}")
+        if dst_path.exists():
+            try:
+                drv.DeleteDataSource(str(dst_path))
+            except Exception:
+                try:
+                    dst_path.unlink()
+                except Exception:
+                    pass
+        out_ds = drv.CreateDataSource(str(dst_path))
+        if out_ds is None:
+            raise SystemExit(f"Cannot create output dataset: {dst_path}")
+        out_lyr = out_ds.CreateLayer(layer_name, srs=in_srs, geom_type=ogr.wkbPolygon)
+        out_datasets.append(out_ds)
+        out_layers.append(out_lyr)
 
     # Copy fields from input; then ensure area fields at the end
     defn = in_lyr.GetLayerDefn()
@@ -107,14 +128,17 @@ def clip_file(in_path: Path, clip_ds: ogr.DataSource, out_dir: Path) -> None:
         fdef = defn.GetFieldDefn(i)
         name = fdef.GetName()
         field_names.append(name)
-        out_lyr.CreateField(ogr.FieldDefn(name, fdef.GetType()))
+        for out_lyr in out_layers:
+            out_lyr.CreateField(ogr.FieldDefn(name, fdef.GetType()))
     # area fields: create only if not present
     has_area_m2 = "area_m2" in field_names
     has_area_ha = "area_ha" in field_names
     if not has_area_m2:
-        out_lyr.CreateField(ogr.FieldDefn("area_m2", ogr.OFTReal))
+        for out_lyr in out_layers:
+            out_lyr.CreateField(ogr.FieldDefn("area_m2", ogr.OFTReal))
     if not has_area_ha:
-        out_lyr.CreateField(ogr.FieldDefn("area_ha", ogr.OFTReal))
+        for out_lyr in out_layers:
+            out_lyr.CreateField(ogr.FieldDefn("area_ha", ogr.OFTReal))
 
     # Clip
     for feat in in_lyr:
@@ -133,20 +157,21 @@ def clip_file(in_path: Path, clip_ds: ogr.DataSource, out_dir: Path) -> None:
             if part.GetGeometryType() not in (ogr.wkbPolygon, ogr.wkbPolygon25D):
                 continue
             a_m2, a_ha = _area_fields(part, in_srs)
-            out_feat = ogr.Feature(out_lyr.GetLayerDefn())
-            for name in field_names:
-                out_feat.SetField(name, feat.GetField(name))
-            # set area fields into existing names or created ones
-            out_feat.SetField("area_m2", a_m2)
-            out_feat.SetField("area_ha", a_ha)
-            out_feat.SetGeometry(part)
-            out_lyr.CreateFeature(out_feat)
-            out_feat = None
+            for out_lyr in out_layers:
+                out_feat = ogr.Feature(out_lyr.GetLayerDefn())
+                for name in field_names:
+                    out_feat.SetField(name, feat.GetField(name))
+                # set area fields into existing names or created ones
+                out_feat.SetField("area_m2", a_m2)
+                out_feat.SetField("area_ha", a_ha)
+                out_feat.SetGeometry(part)
+                out_lyr.CreateFeature(out_feat)
+                out_feat = None
 
-    out_lyr = None
-    out_ds = None
+    out_layers = []
+    out_datasets = []
     in_ds = None
-    print(f"[OK] Clipped {in_path.name} -> {out_path.name}")
+    print(f"[OK] Clipped {in_path.name} -> {out_shp.name} (+ {out_gpkg.name})")
 
 
 def main(argv=None) -> int:
