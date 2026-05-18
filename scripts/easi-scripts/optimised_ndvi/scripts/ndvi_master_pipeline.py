@@ -105,6 +105,15 @@ def parse_args():
         ),
     )
 
+    ap.add_argument(
+        "--export-vectors-to-work-dir",
+        action="store_true",
+        help=(
+            "When chaining to EDS (--run-eds-after), forwards --export-vectors-to-work-dir to EDS "
+            "(copies vector outputs to a simple folder under --work-dir for easy download)."
+        ),
+    )
+
     # Dask chunking (keeps it cheap)
     ap.add_argument("--chunk", type=int, default=2048, help="Dask chunk size for x/y (default 2048)")
 
@@ -403,6 +412,8 @@ def _run_eds_pipeline(
         cmd.append("--verbose")
     if args.copy_to_home:
         cmd.append("--copy-to-home")
+    if getattr(args, "export_vectors_to_work_dir", False):
+        cmd.append("--export-vectors-to-work-dir")
 
     print("[INFO] Running EDS pipeline after NDVI:")
     print("       " + " ".join(cmd))
