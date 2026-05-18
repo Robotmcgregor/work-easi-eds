@@ -165,6 +165,25 @@ def _write_shapefile_set(gdf: gpd.GeoDataFrame, out_dir: Path, stem: str) -> Pat
             "Shapefile outputs were still created."
         )
 
+    # Bundle into a single zip for easy download from S3/ArcGIS cloud connections.
+    try:
+        import zipfile
+
+        zip_path = out_dir / f"{stem}.zip"
+        try:
+            zip_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        members = [p for p in sorted(out_dir.glob(f"{stem}.*")) if p.is_file()]
+        if members:
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for p in members:
+                    # store with just the filename (not full path)
+                    zf.write(p, arcname=p.name)
+    except Exception as e:
+        print(f"[WARN] Failed to create zip bundle for {stem}: {e}")
+
     return shp_path
 
 

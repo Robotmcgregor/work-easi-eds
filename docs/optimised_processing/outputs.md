@@ -44,7 +44,9 @@ This contains:
 - `*_dll_*.clr` – optional ArcGIS colormap sidecar for the DLL raster
 - `*_dlj_*.tif` – interpretation raster (multiple bands)
 - `masks/` – strong/clear mask rasters
-- `vectors/` – shapefiles (and a `.gpkg`) created from those masks
+- `vectors/` – shapefiles (and a `.gpkg`) created from those masks (also a `.zip` bundle per vector dataset)
+
+Note for ArcGIS Pro + Cloud Storage Connections (S3): ArcGIS may show a red exclamation mark for `.gpkg` sources when browsing directly from S3. This usually indicates ArcGIS can't open SQLite-based formats “in place” over the cloud connection. The common workflow is to download/copy the `.gpkg` locally (or use Import/Copy Features, which copies it into a local geodatabase).
 
 ## What are DLL and DLJ?
 
