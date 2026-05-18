@@ -41,9 +41,10 @@ The final run outputs are stored here:
 
 This contains:
 - `*_dll_*.tif` – main class raster
+- `*_dll_*.clr` – optional ArcGIS colormap sidecar for the DLL raster
 - `*_dlj_*.tif` – interpretation raster (multiple bands)
 - `masks/` – strong/clear mask rasters
-- `vectors/` – shapefiles created from those masks
+- `vectors/` – shapefiles (and a `.gpkg`) created from those masks
 
 ## What are DLL and DLJ?
 
