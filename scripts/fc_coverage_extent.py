@@ -127,6 +127,36 @@ def save_polygon(
     ds = None
 
 
+def save_polygon_gpkg(
+    out_path: Path, geom: ogr.Geometry, srs_wkt: str, layer_name: str = "coverage"
+):
+    """Create (or recreate) a single-polygon GeoPackage."""
+    drv = ogr.GetDriverByName("GPKG")
+    if drv is None:
+        raise RuntimeError("GPKG driver not available")
+    if out_path.exists():
+        try:
+            drv.DeleteDataSource(str(out_path))
+        except Exception:
+            try:
+                out_path.unlink()
+            except Exception:
+                pass
+    ds = drv.CreateDataSource(str(out_path))
+    if ds is None:
+        raise RuntimeError(f"Failed to create GeoPackage: {out_path}")
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(srs_wkt)
+    lyr = ds.CreateLayer(layer_name, srs=srs, geom_type=ogr.wkbPolygon)
+    lyr.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
+    feat = ogr.Feature(lyr.GetLayerDefn())
+    feat.SetField("id", 1)
+    feat.SetGeometry(geom)
+    lyr.CreateFeature(feat)
+    feat = None
+    ds = None
+
+
 def _write_mask_raster(out_path: Path, gt, proj, mask_arr: np.ndarray):
     drv = gdal.GetDriverByName("GTiff")
     if out_path.exists():
@@ -237,6 +267,27 @@ def build_presence_mask(
     lyr.CreateField(ogr.FieldDefn("val", ogr.OFTInteger))
     gdal.Polygonize(mem.GetRasterBand(1), None, lyr, 0, [], callback=None)
     shp_ds = None
+
+    # Also write GeoPackage polygon for the same mask
+    drv_gpkg = ogr.GetDriverByName("GPKG")
+    if drv_gpkg is None:
+        raise RuntimeError("GPKG driver not available")
+    gpkg_path = shp_path.with_suffix(".gpkg")
+    if gpkg_path.exists():
+        try:
+            drv_gpkg.DeleteDataSource(str(gpkg_path))
+        except Exception:
+            try:
+                gpkg_path.unlink()
+            except Exception:
+                pass
+    gpkg_ds = drv_gpkg.CreateDataSource(str(gpkg_path))
+    if gpkg_ds is None:
+        raise RuntimeError(f"Failed to create GeoPackage: {gpkg_path}")
+    gpkg_lyr = gpkg_ds.CreateLayer("consistent", srs=srs, geom_type=ogr.wkbPolygon)
+    gpkg_lyr.CreateField(ogr.FieldDefn("val", ogr.OFTInteger))
+    gdal.Polygonize(mem.GetRasterBand(1), None, gpkg_lyr, 0, [], callback=None)
+    gpkg_ds = None
 
 
 def write_per_input_masks_only(rasters: List[Path], per_input_dir: Path):
@@ -353,11 +404,18 @@ def main(argv=None) -> int:
     union_path = out_dir / f"{args.scene}_fc_inputs_union.shp"
     consistent_path = out_dir / f"{args.scene}_fc_consistent.shp"
 
-    if union_path.exists():
+    union_gpkg = union_path.with_suffix(".gpkg")
+    consistent_gpkg = consistent_path.with_suffix(".gpkg")
+
+    if union_path.exists() and union_gpkg.exists():
         print(f"[SKIP] Union footprint already exists: {union_path}")
     else:
-        save_polygon(union_path, union, proj_wkt, "inputs_union")
-        print(f"[OK] Wrote union footprint: {union_path}")
+        if not union_path.exists():
+            save_polygon(union_path, union, proj_wkt, "inputs_union")
+            print(f"[OK] Wrote union footprint: {union_path}")
+        if not union_gpkg.exists():
+            save_polygon_gpkg(union_gpkg, union, proj_wkt, "inputs_union")
+            print(f"[OK] Wrote union footprint: {union_gpkg}")
 
     # Determine ratios list
     ratios: List[float] = []
@@ -367,11 +425,15 @@ def main(argv=None) -> int:
         ratios = [args.min_presence_ratio]
 
     if not ratios:
-        if consistent_path.exists():
+        if consistent_path.exists() and consistent_gpkg.exists():
             print(f"[SKIP] Strict intersection already exists: {consistent_path}")
         else:
-            save_polygon(consistent_path, inter, proj_wkt, "consistent_all")
-            print(f"[OK] Wrote strict intersection: {consistent_path}")
+            if not consistent_path.exists():
+                save_polygon(consistent_path, inter, proj_wkt, "consistent_all")
+                print(f"[OK] Wrote strict intersection: {consistent_path}")
+            if not consistent_gpkg.exists():
+                save_polygon_gpkg(consistent_gpkg, inter, proj_wkt, "consistent_all")
+                print(f"[OK] Wrote strict intersection: {consistent_gpkg}")
     else:
         # Validate ratios
         for r in ratios:
@@ -389,7 +451,8 @@ def main(argv=None) -> int:
             suffix = f"{int(r*100):03d}"  # e.g. 95 -> '095'
             mask_path = out_dir / f"{args.scene}_fc_consistent_r{suffix}.tif"
             shp_path = mask_path.with_name(mask_path.stem + ".shp")
-            if not args.force and mask_path.exists() and shp_path.exists():
+            gpkg_path = shp_path.with_suffix(".gpkg")
+            if not args.force and mask_path.exists() and shp_path.exists() and gpkg_path.exists():
                 print(
                     f"[SKIP] Ratio {r:.2f} outputs already exist: {mask_path} and {shp_path}"
                 )
@@ -397,7 +460,7 @@ def main(argv=None) -> int:
             try:
                 build_presence_mask(rasters, r, mask_path, per_input_dir=None)
                 print(
-                    f"[OK] Wrote ratio {r:.2f} mask & polygon: {mask_path} -> {shp_path}"
+                    f"[OK] Wrote ratio {r:.2f} mask & polygon: {mask_path} -> {shp_path} (+ {gpkg_path.name})"
                 )
             except Exception as e:
                 print(f"[ERROR] Failed ratio {r:.2f} build: {e}")

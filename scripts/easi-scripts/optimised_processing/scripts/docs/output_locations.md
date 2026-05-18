@@ -178,6 +178,10 @@ Each folder contains a standard ESRI Shapefile set (sidecars vary by environment
 
 - `*.shp`, `*.shx`, `*.dbf`, `*.prj` (and sometimes `*.cpg`)
 
+And also a single-file GeoPackage:
+
+- `*.gpkg`
+
 S3 prefixes (folders):
 
 - `{s3_prefix}/tiles/{tile}/outputs/{run_tag}/vectors/strong_ge{strong}/`

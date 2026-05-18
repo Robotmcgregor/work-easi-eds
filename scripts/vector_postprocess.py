@@ -125,8 +125,19 @@ def skinny_filter_and_dissolve(
     lyr = ds.GetLayer(0)
     srs = _copy_spatial_ref(lyr)
 
-    driver = ogr.GetDriverByName("ESRI Shapefile")
-    out_ds, out_lyr = _create_out_layer(driver, out_path, srs, lyr)
+    out_specs = [
+        ("ESRI Shapefile", out_path),
+        ("GPKG", out_path.with_suffix(".gpkg")),
+    ]
+    out_datasets: List[ogr.DataSource] = []
+    out_layers: List[ogr.Layer] = []
+    for drv_name, dst_path in out_specs:
+        driver = ogr.GetDriverByName(drv_name)
+        if driver is None:
+            raise SystemExit(f"OGR driver not available: {drv_name}")
+        ds_out, lyr_out = _create_out_layer(driver, dst_path, srs, lyr)
+        out_datasets.append(ds_out)
+        out_layers.append(lyr_out)
 
     # Determine skinny core buffer distance (in meters)
     core_buf_m = None
@@ -205,32 +216,34 @@ def skinny_filter_and_dissolve(
         parts = _explode_to_parts(dissolved)
         for part in parts:
             area_m2, area_ha = _compute_area_fields(part, srs)
-            out_feat = ogr.Feature(out_lyr.GetLayerDefn())
-            if attr_name and attr_val is not None:
-                out_feat.SetField(attr_name, attr_val)
-            out_feat.SetField("area_m2", float(area_m2))
-            out_feat.SetField("area_ha", float(area_ha))
-            out_feat.SetGeometry(part)
-            out_lyr.CreateFeature(out_feat)
-            out_feat = None
+            for out_lyr in out_layers:
+                out_feat = ogr.Feature(out_lyr.GetLayerDefn())
+                if attr_name and attr_val is not None:
+                    out_feat.SetField(attr_name, attr_val)
+                out_feat.SetField("area_m2", float(area_m2))
+                out_feat.SetField("area_ha", float(area_ha))
+                out_feat.SetGeometry(part)
+                out_lyr.CreateFeature(out_feat)
+                out_feat = None
     else:
         # Write kept geoms without dissolving
         for g in kept_geoms:
             area_m2, area_ha = _compute_area_fields(g, srs)
-            out_feat = ogr.Feature(out_lyr.GetLayerDefn())
-            if attr_name and attr_val is not None:
-                out_feat.SetField(attr_name, attr_val)
-            out_feat.SetField("area_m2", float(area_m2))
-            out_feat.SetField("area_ha", float(area_ha))
-            out_feat.SetGeometry(g)
-            out_lyr.CreateFeature(out_feat)
-            out_feat = None
+            for out_lyr in out_layers:
+                out_feat = ogr.Feature(out_lyr.GetLayerDefn())
+                if attr_name and attr_val is not None:
+                    out_feat.SetField(attr_name, attr_val)
+                out_feat.SetField("area_m2", float(area_m2))
+                out_feat.SetField("area_ha", float(area_ha))
+                out_feat.SetGeometry(g)
+                out_lyr.CreateFeature(out_feat)
+                out_feat = None
 
     # Flush / close
-    out_lyr = None
-    out_ds = None
+    out_layers = []
+    out_datasets = []
     ds = None
-    print(f"[OK] Wrote {out_path.name}")
+    print(f"[OK] Wrote {out_path.name} (+ {out_path.with_suffix('.gpkg').name})")
 
 
 def main(argv=None) -> int:
