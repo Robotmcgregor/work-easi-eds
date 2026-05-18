@@ -121,7 +121,7 @@ What gets forwarded into EDS when using `--run-eds-after`:
 - `--tile`, `--start-date`, `--end-date` (effective window), `--s3-bucket`, `--s3-prefix`, `--work-dir`, `--tile-shp`
 - Processing parameters: `--cloud-max`, `--ndvi-products` (from this pipeline's `--products`), `--target-epsg`, `--resolution`, `--chunk`
 - If set on NDVI, also forwards: `--rebase`, `--dry-run`
-- If set on NDVI, also forwards: `--lookback`, `--verbose`, `--copy-to-home`
+- If set on NDVI, also forwards: `--lookback`, `--verbose`, `--copy-to-home`, `--export-vectors-to-work-dir`
 
 Notes:
 
