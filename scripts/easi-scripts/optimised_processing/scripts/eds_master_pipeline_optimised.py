@@ -116,6 +116,16 @@ def parse_args():
 
     ap.add_argument('--lookback', type=int, default=10)
 
+    ap.add_argument(
+        '--export-vectors-to-work-dir',
+        action='store_true',
+        help=(
+            "Copy vector outputs into a simple folder under --work-dir for easy download "
+            "(e.g. <work-dir>/vectors/<tile>/<run-tag>/...). Useful when ArcGIS Cloud Storage "
+            "Connections can't open/export .gpkg in-place."
+        ),
+    )
+
     ap.add_argument('--rebase', action='store_true', help='Overwrite existing derived products')
     ap.add_argument('--dry-run', action='store_true')
 
@@ -832,6 +842,30 @@ def main():
         print(f'[OK] Clear  mask -> s3://{args.s3_bucket}/{mv.clear_mask_s3}')
         print(f'[OK] Strong SHP  -> s3://{args.s3_bucket}/{mv.strong_shp_s3_prefix}/')
         print(f'[OK] Clear  SHP  -> s3://{args.s3_bucket}/{mv.clear_shp_s3_prefix}/')
+
+        # Optional: also copy vectors to a top-level folder under --work-dir
+        # so they are easy to download as local files.
+        if bool(args.export_vectors_to_work_dir) and (not bool(args.dry_run)):
+            try:
+                import shutil
+
+                src_vectors = paths.maskvec_work / 'vectors'
+                dst_vectors = Path(args.work_dir) / 'vectors' / tile / run_tag
+
+                if bool(args.rebase) and dst_vectors.exists():
+                    shutil.rmtree(dst_vectors, ignore_errors=True)
+
+                dst_vectors.mkdir(parents=True, exist_ok=True)
+
+                for sub in ('strong', 'clear'):
+                    src_sub = src_vectors / sub
+                    if not src_sub.exists():
+                        continue
+                    shutil.copytree(src_sub, dst_vectors / sub, dirs_exist_ok=True)
+
+                print(f"[OK] Local vectors copied -> {dst_vectors}")
+            except Exception as e:
+                print(f"[WARN] Failed to export vectors to --work-dir: {e}")
 
         # ------------------------------------------------------------------
         # STEP 8b: Upload any diagnostics artefacts to S3 (separate prefix).

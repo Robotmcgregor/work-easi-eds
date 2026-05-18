@@ -46,4 +46,6 @@ Use the CLI flags on the pipeline (run `--help` to see them). The two main conce
 - `masks/*.tif` (strong/clear masks)
 - `vectors/*/*.shp` (polygon shapefiles)
 
+Tip (ArcGIS + S3): if you need a simple local folder to download vectors from, run EDS with `--export-vectors-to-work-dir`. This copies vectors to `<work-dir>/vectors/<tile>/<run-tag>/...`.
+
 See [outputs.md](outputs.md) for details.
