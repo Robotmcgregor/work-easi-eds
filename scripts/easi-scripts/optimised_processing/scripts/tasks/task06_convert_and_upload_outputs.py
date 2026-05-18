@@ -22,6 +22,7 @@ from typing import List, Optional
 import rasterio
 
 from lib.cog import to_cog
+from lib.raster_style import apply_dll_style_to_cog_tif, write_arcgis_clr
 from lib.s3_io import upload_file_to_s3
 
 
@@ -84,6 +85,7 @@ def convert_outputs_to_cog_and_upload(
             raise FileNotFoundError(f"Missing expected source output: {src}")
 
         cog_tif = work_dir / final_name.name
+        clr_path = work_dir / f"{final_name.stem}.clr"
 
         # If source is already a GeoTIFF, skip ENVI conversion
         if src.suffix.lower() in {".tif", ".tiff"}:
@@ -103,6 +105,13 @@ def convert_outputs_to_cog_and_upload(
         else:
             raise RuntimeError(f"Unsupported source format for output conversion: {src}")
 
+        # Apply ArcGIS-friendly classified styling for DLL outputs.
+        # - Embed a palette/colormap in the GeoTIFF
+        # - Write a sidecar .clr for quick import if needed
+        if product == "dll":
+            apply_dll_style_to_cog_tif(cog_tif)
+            write_arcgis_clr(clr_path)
+
         key = f"{prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/{cog_tif.name}"
         upload_file_to_s3(str(cog_tif), bucket=bucket, key=key)
         uploaded.append(
@@ -111,6 +120,16 @@ def convert_outputs_to_cog_and_upload(
                 s3_uri=f"s3://{bucket}/{key}",
             )
         )
+
+        if product == "dll" and clr_path.exists():
+            clr_key = f"{prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}/{clr_path.name}"
+            upload_file_to_s3(str(clr_path), bucket=bucket, key=clr_key)
+            uploaded.append(
+                UploadedOutput(
+                    local_cog=clr_path,
+                    s3_uri=f"s3://{bucket}/{clr_key}",
+                )
+            )
 
         if product == "dll":
             dllmz_cog_local = cog_tif
