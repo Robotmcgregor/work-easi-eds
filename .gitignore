@@ -27,7 +27,9 @@ data/**
 *.log
 *.tmp
 exports/
-assets/
+# assets/
+nvms_runs/run1/
+nvms_runs/run2/
 data/
 output/
 
@@ -52,13 +54,13 @@ output/
 *.tfw
 
 # Vector formats (shapefiles + friends)
-*.shp
-*.shx
-*.dbf
-*.cpg
-*.qix
-*.sbn
-*.sbx
+# *.shp
+# *.shx
+# *.dbf
+# *.cpg
+# *.qix
+# *.sbn
+# *.sbx
 
 # GeoPackages / other vector containers
 *.gpkg
