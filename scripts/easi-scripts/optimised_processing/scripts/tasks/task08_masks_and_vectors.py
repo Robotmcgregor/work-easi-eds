@@ -110,6 +110,80 @@ def _write_shapefile_set(gdf: gpd.GeoDataFrame, out_dir: Path, stem: str) -> Pat
     shp_path = out_dir / f"{stem}.shp"
     # ESRI Shapefile driver creates the sidecar files automatically
     gdf.to_file(shp_path, driver="ESRI Shapefile")
+
+    # Also write a single-file GeoPackage for easier downstream use.
+    gpkg_path = out_dir / f"{stem}.gpkg"
+    try:
+        try:
+            import fiona  # type: ignore
+
+            supported = getattr(fiona, "supported_drivers", {}) or {}
+            if "GPKG" not in supported:
+                raise RuntimeError(
+                    "Fiona/GDAL in this environment does not advertise the 'GPKG' driver. "
+                    "(Often caused by missing GDAL SQLite support.)"
+                )
+        except Exception:
+            # If Fiona isn't installed or doesn't expose supported_drivers, we'll
+            # still attempt the write and report any failure.
+            pass
+
+        try:
+            gpkg_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        # Use a short/stable layer name for maximum compatibility.
+        # (Very long stems can produce awkward layer/table names in some tooling.)
+        layer_name = "polygons"
+
+        # Some Fiona/GeoPandas versions require/accept `layer`, others ignore it.
+        try:
+            gdf.to_file(gpkg_path, driver="GPKG", layer=layer_name)
+        except TypeError:
+            gdf.to_file(gpkg_path, driver="GPKG")
+
+        # Basic sanity check: ensure it wrote something and is readable.
+        try:
+            if gpkg_path.exists() and gpkg_path.stat().st_size == 0:
+                raise RuntimeError("GeoPackage written with zero size")
+        except Exception:
+            raise
+
+        try:
+            # If this fails, the file is likely corrupt or the driver is missing.
+            _ = gpd.read_file(gpkg_path, layer=layer_name)
+        except Exception as e:
+            raise RuntimeError(f"GeoPackage validation read failed: {e}")
+    except Exception as e:
+        try:
+            gpkg_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        print(
+            f"[WARN] Failed to write a valid GeoPackage: {gpkg_path} ({e}). "
+            "Shapefile outputs were still created."
+        )
+
+    # Bundle into a single zip for easy download from S3/ArcGIS cloud connections.
+    try:
+        import zipfile
+
+        zip_path = out_dir / f"{stem}.zip"
+        try:
+            zip_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        members = [p for p in sorted(out_dir.glob(f"{stem}.*")) if p.is_file()]
+        if members:
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for p in members:
+                    # store with just the filename (not full path)
+                    zf.write(p, arcname=p.name)
+    except Exception as e:
+        print(f"[WARN] Failed to create zip bundle for {stem}: {e}")
+
     return shp_path
 
 
@@ -117,6 +191,9 @@ def _upload_shapefile_folder(local_dir: Path, bucket: str, s3_prefix: str) -> No
     # upload all expected shapefile components present in folder
     for p in sorted(local_dir.glob("*")):
         if p.is_file():
+            # Avoid uploading transient sqlite sidecars (rare, but can exist).
+            if p.name.lower().endswith((".gpkg-wal", ".gpkg-shm", ".gpkg-journal")):
+                continue
             key = f"{s3_prefix.rstrip('/')}/{p.name}"
             upload_file_to_s3(str(p), bucket=bucket, key=key)
 

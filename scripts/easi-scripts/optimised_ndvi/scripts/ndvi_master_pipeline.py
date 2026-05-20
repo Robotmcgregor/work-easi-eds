@@ -80,6 +80,40 @@ def parse_args():
     ap.add_argument("--limit", type=int, default=0, help="Process only first N scenes (0 = no limit)")
     ap.add_argument("--dry-run", action="store_true")
 
+    ap.add_argument(
+        "--lookback",
+        type=int,
+        default=10,
+        help=(
+            "Years of seasonal-baseline lookback (default 10). "
+            "The NDVI stage will ensure NDVI scenes exist for the seasonal window across these years. "
+            "When chaining to EDS (--run-eds-after), this is also forwarded into EDS."
+        ),
+    )
+    ap.add_argument(
+        "--verbose",
+        action="store_true",
+        help=(
+            "Verbose logging. When chaining to EDS (--run-eds-after), forwards --verbose to EDS."
+        ),
+    )
+    ap.add_argument(
+        "--copy-to-home",
+        action="store_true",
+        help=(
+            "When chaining to EDS (--run-eds-after), forwards --copy-to-home to EDS (copies outputs under /home/jovyan)."
+        ),
+    )
+
+    ap.add_argument(
+        "--export-vectors-to-work-dir",
+        action="store_true",
+        help=(
+            "When chaining to EDS (--run-eds-after), forwards --export-vectors-to-work-dir to EDS "
+            "(copies vector outputs to a simple folder under --work-dir for easy download)."
+        ),
+    )
+
     # Dask chunking (keeps it cheap)
     ap.add_argument("--chunk", type=int, default=2048, help="Dask chunk size for x/y (default 2048)")
 
@@ -222,10 +256,103 @@ def _yyyymmdd_to_iso(d: str) -> str:
     return f"{d[0:4]}-{d[4:6]}-{d[6:8]}"
 
 
+def _shift_months_yyyymmdd(d: str, months: int) -> str:
+    """Shift a YYYYMMDD date by N months and return YYYYMMDD.
+
+    Uses pandas DateOffset so month arithmetic is calendar-aware.
+    """
+    d = normalise_yyyymmdd(d)
+    ts = pd.Timestamp(_yyyymmdd_to_iso(d))
+    ts2 = ts + pd.DateOffset(months=int(months))
+    return ts2.strftime("%Y%m%d")
+
+
+def _mmdd_in_seasonal_window(yyyymmdd: str, window_start_mmdd: str, window_end_mmdd: str) -> bool:
+    """Return True if date's MMDD is within window bounds (inclusive).
+
+    Supports windows that wrap over new year (e.g. 0929 -> 0401).
+    """
+    mmdd = str(yyyymmdd)[4:8]
+    ws = str(window_start_mmdd)
+    we = str(window_end_mmdd)
+    if len(mmdd) != 4 or len(ws) != 4 or len(we) != 4:
+        return False
+
+    if ws <= we:
+        return ws <= mmdd <= we
+    # wraps over new year
+    return (mmdd >= ws) or (mmdd <= we)
+
+
+def _build_seasonal_baseline_df(
+    *,
+    manifest_df: pd.DataFrame,
+    eff_start_yyyymmdd: str,
+    eff_end_yyyymmdd: str,
+    lookback_years: int,
+    expand_months: int = 2,
+) -> pd.DataFrame:
+    """Filter manifest to the EDS-style seasonal baseline window across lookback years."""
+    if manifest_df is None or manifest_df.empty:
+        return pd.DataFrame()
+
+    eff_start_yyyymmdd = normalise_yyyymmdd(eff_start_yyyymmdd)
+    eff_end_yyyymmdd = normalise_yyyymmdd(eff_end_yyyymmdd)
+    lookback_years = max(0, int(lookback_years))
+
+    # Seasonal window is based on (start - expand_months) and (end + expand_months),
+    # but evaluated as MMDD bounds across multiple years.
+    win_start = _shift_months_yyyymmdd(eff_start_yyyymmdd, -int(expand_months))
+    win_end = _shift_months_yyyymmdd(eff_end_yyyymmdd, int(expand_months))
+    window_start_mmdd = win_start[4:]
+    window_end_mmdd = win_end[4:]
+
+    start_year = int(eff_start_yyyymmdd[:4])
+    end_year = int(eff_end_yyyymmdd[:4])
+    min_year = start_year - lookback_years
+
+    out = manifest_df.copy()
+    if "yyyymmdd" not in out.columns:
+        out["yyyymmdd"] = out["date"].apply(normalise_yyyymmdd)
+
+    years = out["yyyymmdd"].astype(str).str[:4].astype(int)
+    out = out[(years >= min_year) & (years <= end_year)].copy()
+    out = out[out["yyyymmdd"].apply(lambda d: _mmdd_in_seasonal_window(str(d), window_start_mmdd, window_end_mmdd))].copy()
+
+    out = out.sort_values(["yyyymmdd", "platform", "product"]).reset_index(drop=True)
+    out.attrs["seasonal_window_start_mmdd"] = window_start_mmdd
+    out.attrs["seasonal_window_end_mmdd"] = window_end_mmdd
+    out.attrs["seasonal_window_start_yyyymmdd"] = win_start
+    out.attrs["seasonal_window_end_yyyymmdd"] = win_end
+    out.attrs["lookback_years"] = lookback_years
+    out.attrs["min_year"] = min_year
+    out.attrs["end_year"] = end_year
+    return out
+
+
 def _default_eds_script_path() -> Path:
     # ndvi_master_pipeline.py is under: scripts/easi-scripts/optimised_ndvi/scripts/
-    easi_scripts_dir = Path(__file__).resolve().parents[3]
-    return easi_scripts_dir / "optimised_processing" / "scripts" / "eds_master_pipeline_optimised.py"
+    # We want: <repo>/scripts/easi-scripts/optimised_processing/scripts/eds_master_pipeline_optimised.py
+    # __file__ parents:
+    #   0: .../optimised_ndvi/scripts
+    #   1: .../optimised_ndvi
+    #   2: .../easi-scripts
+    #   3: .../scripts
+    #   4: <repo>
+    easi_scripts_dir = Path(__file__).resolve().parents[2]
+    candidate = easi_scripts_dir / "optimised_processing" / "scripts" / "eds_master_pipeline_optimised.py"
+    if candidate.exists():
+        return candidate
+
+    # Fallback: search upwards for the expected scripts/easi-scripts root.
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        alt = parent / "scripts" / "easi-scripts" / "optimised_processing" / "scripts" / "eds_master_pipeline_optimised.py"
+        if alt.exists():
+            return alt
+
+    # Return the primary candidate even if missing so caller can error with a useful path.
+    return candidate
 
 
 def _run_eds_pipeline(
@@ -273,12 +400,20 @@ def _run_eds_pipeline(
         str(args.resolution),
         "--chunk",
         str(args.chunk),
+        "--lookback",
+        str(int(args.lookback)),
     ]
 
     if args.rebase:
         cmd.append("--rebase")
     if args.dry_run:
         cmd.append("--dry-run")
+    if args.verbose:
+        cmd.append("--verbose")
+    if args.copy_to_home:
+        cmd.append("--copy-to-home")
+    if getattr(args, "export_vectors_to_work_dir", False):
+        cmd.append("--export-vectors-to-work-dir")
 
     print("[INFO] Running EDS pipeline after NDVI:")
     print("       " + " ".join(cmd))
@@ -389,8 +524,9 @@ def main():
 
         manifest_df["target_epsg"] = manifest_df.apply(_resolve_row_epsg_series, axis=1)
 
-    print("[DEBUG] manifest cols:", list(manifest_df.columns))
-    print(manifest_df.head(1).to_dict("records"))
+    if args.verbose:
+        print("[DEBUG] manifest cols:", list(manifest_df.columns))
+        print(manifest_df.head(1).to_dict("records"))
 
     # Compute normalised date string column used for window selection/filtering.
     manifest_df = manifest_df.copy()
@@ -411,25 +547,31 @@ def main():
         run_log_df=run_log_df,
     )
 
-    # If auto-resume and already up to date, exit early (unless chaining to EDS).
-    if (not args.start_date) and (not args.end_date) and (not args.run_eds_after):
-        last_end = last_success_end_date(run_log_df, tile)
-        if last_end and eff_start == eff_end and eff_end <= last_end:
-            print(f"[DONE] Up to date: last_success_end={last_end}, latest_available={eff_end}")
-            return
-
     print(f"[INFO] Effective window: {eff_start} -> {eff_end}")
 
-    manifest_df = _filter_manifest_by_window(manifest_df, eff_start, eff_end)
+    # Build the EDS-style seasonal baseline (±2 months around the effective window), across lookback years.
+    baseline_df = _build_seasonal_baseline_df(
+        manifest_df=manifest_df,
+        eff_start_yyyymmdd=eff_start,
+        eff_end_yyyymmdd=eff_end,
+        lookback_years=int(args.lookback),
+        expand_months=2,
+    )
 
-    print(f"[INFO] Manifest scenes in window: {len(manifest_df)}")
+    win_start = baseline_df.attrs.get("seasonal_window_start_yyyymmdd")
+    win_end = baseline_df.attrs.get("seasonal_window_end_yyyymmdd")
+    min_year = baseline_df.attrs.get("min_year")
+    end_year = baseline_df.attrs.get("end_year")
+    print(f"[INFO] Seasonal window (expanded ±2 months): {win_start} -> {win_end}")
+    print(f"[INFO] Baseline lookback years: {int(args.lookback)} (years {min_year}..{end_year})")
+    print(f"[INFO] Manifest scenes in baseline window: {len(baseline_df)}")
 
     # import sys
     # sys.exit("Forced stop after manifest")
 
     if args.limit and args.limit > 0:
-        manifest_df = manifest_df.head(args.limit).reset_index(drop=True)
-        print(f"[INFO] Limit enabled: {len(manifest_df)} scenes")
+        baseline_df = baseline_df.head(args.limit).reset_index(drop=True)
+        print(f"[INFO] Limit enabled: {len(baseline_df)} scenes")
 
     # 3) run logging + process each scene
     run_row = new_run_row(
@@ -443,7 +585,7 @@ def main():
     )
     run_id = run_row["run_id"]
 
-    scenes_total = int(len(manifest_df))
+    scenes_total = int(len(baseline_df))
     scenes_processed = 0
     scenes_skipped_existing = 0
     scenes_failed = 0
@@ -462,7 +604,7 @@ def main():
     final_status = "success"
 
     try:
-        for row in manifest_df.itertuples(index=False):
+        for row in baseline_df.itertuples(index=False):
             yyyymmdd = normalise_yyyymmdd(row.date)
             product = str(row.product)
             platform = str(row.platform)
@@ -501,6 +643,7 @@ def main():
                 work_dir=work_dir,
                 resolution=float(args.resolution),
                 rebase=bool(args.rebase),
+                dask_chunk=int(args.chunk),
             )
             scenes_processed += 1
 
