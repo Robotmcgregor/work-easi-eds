@@ -100,12 +100,13 @@ def main():
         print(f"[BATCH] All tiles processed. Log written to {log_path}")
         return
 
+
     # --- Single-tile logic below (factored out for batch mode) ---
     run_single_tile(args)
 
 
 # --- Factored out single-tile logic for batch and direct runs ---
-    )
+def run_single_tile(args):
     from pathlib import Path
     tile = args.tile.lower()
     base_work_dir = Path(args.work_dir)
@@ -115,9 +116,11 @@ def main():
     run_log_cache_dir = work_dir / "run_logs"
     existing = inventory_existing_outputs(
         bucket=args.s3_bucket,
-
-    ap.add_argument("--start-date", default=None, help="YYYY-MM-DD (optional)")
-    ap.add_argument("--end-date", default=None, help="YYYY-MM-DD (optional)")
+        prefix=args.s3_prefix,
+        tile=tile,
+    )
+    print(f"[INFO] Existing NDVI outputs found in S3: {len(existing)}")
+    # ...existing code for single-tile processing...
 
     ap.add_argument("--products", nargs="+", default=["ga_ls8c_ard_3", "ga_ls9c_ard_3"],
                     help="Datacube product names for LS8/LS9 ARD")
