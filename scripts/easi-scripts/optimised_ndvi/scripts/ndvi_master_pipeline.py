@@ -67,7 +67,7 @@ def parse_args():
         help="Delete the entire run folder in --work-dir after processing completes (use with caution!).",
     )
 
-    ap.add_argument("--tile", required=True, help="e.g. p089r084")
+    ap.add_argument("--tile", required=False, help="e.g. p089r084")
 
     ap.add_argument("--s3-bucket", required=True, help="e.g. dcceew-eds-data")
     ap.add_argument("--s3-prefix", required=True, help="e.g. ARO...:robotmcgregor/eds/optimised")
@@ -162,7 +162,13 @@ def parse_args():
         ),
     )
 
-    return ap.parse_args()
+    args = ap.parse_args()
+    # Enforce that either --tile or --run-all-tiles is set, but not both
+    if not args.run_all_tiles and not args.tile:
+        ap.error("You must specify either --tile or --run-all-tiles.")
+    if args.run_all_tiles and args.tile:
+        ap.error("Do not specify --tile when using --run-all-tiles.")
+    return args
 
 import re
 
