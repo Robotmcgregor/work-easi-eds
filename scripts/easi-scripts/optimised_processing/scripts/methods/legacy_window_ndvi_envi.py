@@ -1,4 +1,31 @@
-#!/usr/bin/env python
+!/usr/bin/env python3
+
+# ------------------------------------------------------------------------------
+# MIT License
+
+# Copyright (c) 2026 Robert McGregor - strongly influenced by original code developed by Neil Flood
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# ------------------------------------------------------------------------------
+
+
+
 """
 Legacy seasonal-window change detection using NDVI (DLL/DLJ) — SR-based variant.
 
@@ -627,64 +654,130 @@ def stretch(
     return stretched.astype(np.uint8)
 
 def write_diag_stats_csv(values: np.ndarray, out_csv: str | Path, *, thresholds=(2.5, 6.0, 10.0)) -> None:
+    """
+    Write a CSV file summarizing the distribution of a diagnostic metric (e.g., NDVI change).
+
+    This function takes an array of values (i.e. per-pixel change scores), computes summary statistics, and writes them to a CSV file. 
+    It also reports the percentage of values that exceed certain thresholds, which helps users quickly assess how many pixels show strong 
+    changes.
+
+    Args:
+        values: The array of metric values to summarize (e.g., NDVI change per pixel).
+        out_csv: The output CSV file path.
+        thresholds: A tuple of threshold values to report exceedance rates for (default: 2.5, 6.0, 10.0).
+
+    The resulting CSV can be used for diagnostics, quality control, or reporting in change detection workflows.
+    """
+
+    # Convert the input array to float64 for precision
     v = values.astype(np.float64)
+    # Remove any non-finite values (like NaN or inf)
     v = v[np.isfinite(v)]
+    # If there are no valid values, write a minimal CSV and exit
     if v.size == 0:
         _write_text_anywhere(str(out_csv), "metric,count\nndviDiffStdErr,0\n", encoding="utf-8")
         return
 
+    # Calculate percentiles to summarize the distribution of values
     pct = np.percentile(v, [0, 1, 5, 10, 25, 50, 75, 90, 95, 99, 100])
     lines = []
+    # Write the CSV header: metric name, count, mean, std, and various percentiles
     lines.append("metric,count,mean,std,min,p01,p05,p10,p25,p50,p75,p90,p95,p99,max")
+    # Write the summary statistics for the metric
     lines.append(
-        "ndviDiffStdErr,"
-        f"{v.size},{v.mean():.6f},{v.std():.6f},"
-        f"{pct[0]:.6f},{pct[1]:.6f},{pct[2]:.6f},{pct[3]:.6f},{pct[4]:.6f},"
-        f"{pct[5]:.6f},{pct[6]:.6f},{pct[7]:.6f},{pct[8]:.6f},{pct[9]:.6f},{pct[10]:.6f}"
+        "ndviDiffStdErr,"  # Name of the metric being summarized
+        f"{v.size},{v.mean():.6f},{v.std():.6f},"  # Count, mean, std deviation
+        f"{pct[0]:.6f},{pct[1]:.6f},{pct[2]:.6f},{pct[3]:.6f},{pct[4]:.6f},"  # min, p01, p05, p10, p25
+        f"{pct[5]:.6f},{pct[6]:.6f},{pct[7]:.6f},{pct[8]:.6f},{pct[9]:.6f},{pct[10]:.6f}"  # p50, p75, p90, p95, p99, max
     )
 
-    # threshold exceedance rates
+    # Add a blank line, then a section for threshold exceedance rates
     lines.append("")
     lines.append("threshold,percent_ge")
+    # For each threshold, calculate the percentage of values greater than or equal to it
     for t in thresholds:
         lines.append(f"{t},{(np.mean(v >= t) * 100):.4f}")
 
+    # Write all lines to the output CSV file
     _write_text_anywhere(str(out_csv), "\n".join(lines) + "\n", encoding="utf-8")
 
 
 def write_diag_bins_csv(values: np.ndarray, out_csv: str | Path, *, bins=256, clip_abs=200.0) -> None:
+    """
+    Write a CSV file containing a histogram (bin counts) of a diagnostic metric's values.
+
+    This function takes an array of values (such as per-pixel change scores), clips extreme values
+    to a specified range, bins the values into a histogram, and writes the bin edges and counts to a CSV file.
+    This helps users visualize the distribution of values and spot outliers or skewed data.
+
+    Args:
+        values: The array of metric values to summarize (e.g., NDVI change per pixel).
+        out_csv: The output CSV file path.
+        bins: Number of histogram bins (default: 256).
+        clip_abs: Maximum absolute value for clipping (default: 200.0).
+
+    The resulting CSV can be used for plotting histograms or for diagnostic review in change detection workflows.
+    """
+    # Convert the input array to float64 for precision
     v = values.astype(np.float64)
+    # Remove any non-finite values (like NaN or inf)
     v = v[np.isfinite(v)]
+    # If there are no valid values, write a minimal CSV and exit
     if v.size == 0:
         _write_text_anywhere(str(out_csv), "bin_left,bin_right,count\n", encoding="utf-8")
         return
-
+    # Clip values to the specified range to avoid outliers dominating the histogram
     v = np.clip(v, -clip_abs, clip_abs)
+    # Compute the histogram: counts of values in each bin, and the bin edges
     counts, edges = np.histogram(v, bins=bins)
     lines = ["bin_left,bin_right,count"]
+    # Write each bin's left/right edge and count to the CSV
     for i in range(len(counts)):
         lines.append(f"{edges[i]:.6f},{edges[i+1]:.6f},{int(counts[i])}")
+    # Write all lines to the output CSV file
     _write_text_anywhere(str(out_csv), "\n".join(lines) + "\n", encoding="utf-8")
 
+    
+
 def write_stats_csv(values: np.ndarray, out_csv: str | Path) -> None:
+    """
+    Write a CSV file summarizing the distribution of a diagnostic metric (e.g., NDVI change) with key statistics and threshold rates.
+
+    This function takes an array of values (such as per-pixel change scores), computes summary statistics
+    (mean, standard deviation, min, max, and percentiles), and writes them to a CSV file. It also reports the percentage
+    of values that exceed certain fixed thresholds (2.5, 4.0, 6.0, 10.0), which helps users quickly assess how many pixels show strong changes.
+
+    Args:
+        values: The array of metric values to summarize (e.g., NDVI change per pixel).
+        out_csv: The output CSV file path.
+
+    The resulting CSV can be used for diagnostics, quality control, or reporting in change detection workflows.
+    """
+    # Remove any non-finite values (like NaN or inf)
     v = values[np.isfinite(values)]
+    # If there are no valid values, write a minimal CSV and exit
     if v.size == 0:
         _write_text_anywhere(str(out_csv), "count,mean,std,min,p01,p05,p10,p25,p50,p75,p90,p95,p99,max\n0\n")
         return
-
+    # Calculate percentiles to summarize the distribution of values
     pct = np.percentile(v, [1,5,10,25,50,75,90,95,99])
     lines = [
+        # CSV header: count, mean, std, min, percentiles, max
         "count,mean,std,min,p01,p05,p10,p25,p50,p75,p90,p95,p99,max",
+        # Write the summary statistics for the metric
         f"{v.size},{v.mean():.6f},{v.std():.6f},{v.min():.6f},"
         f"{pct[0]:.6f},{pct[1]:.6f},{pct[2]:.6f},{pct[3]:.6f},"
         f"{pct[4]:.6f},{pct[5]:.6f},{pct[6]:.6f},{pct[7]:.6f},{pct[8]:.6f},{v.max():.6f}",
         "",
+        # Section for threshold exceedance rates
         "threshold,percent_ge",
+        # For each fixed threshold, calculate the percentage of values greater than or equal to it
         f"2.5,{(np.mean(v >= 2.5) * 100):.4f}",
         f"4.0,{(np.mean(v >= 4.0) * 100):.4f}",
         f"6.0,{(np.mean(v >= 6.0) * 100):.4f}",
         f"10.0,{(np.mean(v >= 10.0) * 100):.4f}",
     ]
+    # Write all lines to the output CSV file
     _write_text_anywhere(str(out_csv), "\n".join(lines) + "\n")
 
 
@@ -705,6 +798,10 @@ def write_bins_csv(values: np.ndarray, out_csv: str | Path, bins=256, clip=200.0
 
 def main(argv=None) -> int:
     """Execute the legacy seasonal-window change detection using NDVI."""
+    # This is the main function that runs the NDVI-based legacy change detection method.
+    # It takes in a set of satellite images (NDVI and surface reflectance),
+    # builds a time series, computes statistics, and outputs change maps.
+    # The function is designed to be run as a script with command-line arguments.
     ap = argparse.ArgumentParser(
         description="Legacy-method change detection (seasonal window) using NDVI from SR"
     )
@@ -770,12 +867,13 @@ def main(argv=None) -> int:
 
     args = ap.parse_args(argv)
 
+    # Parse and normalise input arguments
     scene = args.scene.lower()
-    sd = args.start_date
-    ed = args.end_date
-    ws = args.window_start or sd[4:]
-    we = args.window_end or ed[4:]
-    output_base = _normalise_output_base(args.output_dir or os.getcwd())
+    sd = args.start_date  # Start date (YYYYMMDD)
+    ed = args.end_date    # End date (YYYYMMDD)
+    ws = args.window_start or sd[4:]  # Seasonal window start (MMDD)
+    we = args.window_end or ed[4:]    # Seasonal window end (MMDD)
+    output_base = _normalise_output_base(args.output_dir or os.getcwd())  # Where outputs will be written
     diagnostics_base = _normalise_output_base(args.diagnostics_dir or _join_out(output_base, "diagnostics"))
     _ensure_local_dir(output_base)
     _ensure_local_dir(diagnostics_base)
@@ -784,7 +882,8 @@ def main(argv=None) -> int:
         print(f"[VALIDATION] output_dir: {output_base}")
         print(f"[VALIDATION] diagnostics_dir: {diagnostics_base}")
 
-    # Resolve SR db8 stacks
+    # Find the input surface reflectance (SR) files for the start and end dates.
+    # These are multi-band images used for spectral calculations.
     if args.start_db8 and args.end_db8:
         start_db8 = args.start_db8
         end_db8 = args.end_db8
@@ -795,7 +894,8 @@ def main(argv=None) -> int:
     if not os.path.exists(start_db8) or not os.path.exists(end_db8):
         raise SystemExit("Start/end db8 files not found; provide --start-db8/--end-db8 or build them.")
 
-    # Resolve dc4 (NDVI) files
+    # Find all NDVI images (dc4 files) for this scene and time period.
+    # These are single-band images representing vegetation index values.
     if args.dc4_glob:
         dc4_files = sorted(glob.glob(args.dc4_glob))
     else:
@@ -805,7 +905,8 @@ def main(argv=None) -> int:
     if not dc4_files:
         raise SystemExit("No dc4 (NDVI) images found")
 
-    # Load SR reflectance
+    # Load the start and end surface reflectance images into arrays.
+    # These will be used for spectral index calculations.
     ref_start, georef = load_raster(start_db8)
     ref_end, _ = load_raster(end_db8)
 
@@ -825,12 +926,16 @@ def main(argv=None) -> int:
                 med = float(np.median(b5_nz))
                 print(f"[VALIDATION] sr_scale_hint: start_db8 band5 median_nonzero={med:.6g} (expect ~0..1 if reflectance-scaled)")
 
-    # Sanitise SR stacks so nodata/fill values do not break log1p()
+    # Clean up the SR arrays so that missing or invalid values are set to zero.
+    # This prevents errors in later calculations (e.g., log1p).
     ref_start = sanitise_sr_for_log(ref_start, nodata=-9999.0)
     ref_end = sanitise_sr_for_log(ref_end, nodata=-9999.0)
 
     # ------------------------------------------------------------------
-    # SR scale handling (high impact for legacy log1p spectral coefficients)
+    # Decide how to scale the SR data. Many satellite products store reflectance
+    # as integers (e.g., 0-10000), but the math expects values between 0 and 1.
+    # This block figures out the right scaling factor, either from user input or by guessing.
+    # This is important for the log1p() spectral index math to work correctly.
     # ------------------------------------------------------------------
     if args.sr_scale is not None:
         sr_scale = float(args.sr_scale)
@@ -860,10 +965,11 @@ def main(argv=None) -> int:
         print(f"[VALIDATION] sr_scale_factor: {sr_scale} (source={sr_scale_source}; applied as ref /= sr_scale before log1p)")
 
     if sr_scale != 1.0:
+        # Apply the scaling factor to convert reflectance to the expected range.
         ref_start = (ref_start / sr_scale).astype(np.float32)
         ref_end = (ref_end / sr_scale).astype(np.float32)
 
-        # Safety: keep any tiny negatives at 0
+        # Make sure there are no negative values (shouldn't happen, but just in case)
         ref_start[ref_start < 0] = 0.0
         ref_end[ref_end < 0] = 0.0
 
@@ -871,7 +977,8 @@ def main(argv=None) -> int:
             _print_stack_summary("db8_start_scaled", ref_start, band_indices_0based=[1, 2, 4, 5])
             _print_stack_summary("db8_end_scaled", ref_end, band_indices_0based=[1, 2, 4, 5])
 
-    # Load NDVI dc4 images (optionally align to start_db8 grid)
+    # Load all NDVI images into arrays.
+    # Optionally, align (warp) them to the same grid as the SR images to ensure pixel-perfect matching.
     raw_ndvi = []
     dates = []
     paths = []
@@ -883,7 +990,7 @@ def main(argv=None) -> int:
                 raise SystemExit(f"dc4 (NDVI) must be single band: {p}")
             raw_ndvi.append(arr[0])
         else:
-            # Warp onto db8 grid to avoid misregistration between GA0 (SR) and GA1 (NDVI).
+            # Warp NDVI to match the SR grid (important for correct change detection)
             nd, did_warp = load_single_band_raster(
                 p,
                 align_to_path=start_db8,
@@ -907,7 +1014,8 @@ def main(argv=None) -> int:
         _print_gdal_info("dc4_ndvi_sample", dc4_files[0])
         _print_stack_summary("dc4_ndvi_sample", raw_ndvi[0])
 
-    # Determine common shape
+    # All images must have the same shape (rows/columns) for pixel-wise math.
+    # Find the smallest common shape and crop all arrays to match.
     ys = []
     xs = []
     for a in [ref_start, ref_end] + raw_ndvi:
@@ -930,7 +1038,9 @@ def main(argv=None) -> int:
     ref_end = crop(ref_end).astype(np.float32)
     raw_ndvi = [crop(a) for a in raw_ndvi]
 
-    # Build seasonal baseline: select one NDVI per year within window, up to lookback years
+    # Build the "baseline" NDVI stack: for each year in the lookback window,
+    # pick one NDVI image within the seasonal window, before the start date.
+    # This gives a time series of "typical" NDVI for this season.
     baseline_ndvi = []
     baseline_dates = []
     baseline_paths = []
@@ -945,12 +1055,13 @@ def main(argv=None) -> int:
             and d <= sd
         ]
         if candidates:
+            # Pick the candidate closest in day-of-year to the start date
             chosen = min(candidates, key=lambda x: abs(int(x[1][4:]) - int(sd[4:])))
             baseline_ndvi.append(chosen[0])
             baseline_dates.append(chosen[1])
             baseline_paths.append(chosen[2])
 
-    # Fallback if baseline is too small
+    # If not enough baseline images, fall back to all available NDVI before the start date
     if len(baseline_ndvi) < 2:
         fallback = [
             (p, d, fp) for p, d, fp in zip(raw_ndvi, dates, paths)
@@ -998,12 +1109,19 @@ def main(argv=None) -> int:
         _print_stack_summary("ndvi_start_raw", start_ndvi)
         _print_stack_summary("ndvi_end_raw", end_ndvi)
 
-    # Normalize NDVI
+    # Normalize all NDVI arrays so that they have a mean of ~125 and a standard deviation of ~15.
+    # This puts all images on a common scale, making the math more robust.
     norm_baseline = [normalise_ndvi(a) for a in baseline_ndvi]
     norm_start = normalise_ndvi(start_ndvi)
     norm_end = normalise_ndvi(end_ndvi)
 
-    # Compute baseline statistics
+    # Compute statistics across the baseline NDVI stack:
+    # - mean: average NDVI for each pixel
+    # - std: standard deviation (how much NDVI varies)
+    # - stderr: standard error (uncertainty in the mean)
+    # - slope: trend over years (is NDVI increasing or decreasing?)
+    # - intercept: baseline value at year zero
+    # - n_valid: number of valid (non-nodata) images per pixel
     base_mean, base_std, base_stderr, base_slope, base_intercept, base_n_valid = timeseries_stats(
         norm_baseline,
         baseline_dates,
@@ -1011,33 +1129,34 @@ def main(argv=None) -> int:
     )
 
     # Compute change indices
-    # ndvi_trend: how much the (normalised) NDVI changed between start and end.
-    # IMPORTANT: treat norm==0 as nodata and do not let nodata differences dominate.
+    # ndvi_trend: the difference in NDVI between the end and start images for each pixel.
+    # Only compute this where both start and end are valid (not nodata).
     ndvi_valid = (norm_start > 0) & (norm_end > 0)
     ndvi_trend = (norm_end.astype(np.float32) - norm_start.astype(np.float32))
     ndvi_trend[~ndvi_valid] = 0.0
 
-    # Spectral index from SR (db8) — use the same legacy weighted log1p combination
-    # as the FC script. This looks at start vs end reflectance for bands 2,3,5,6.
-    # Note: db8 indexing in legacy code refers to [1,2,4,5] for B2,B3,B5,B6 respectively.
-    # Our arrays are 0-based, so indices become [1,2,4,5].
+    # Calculate the "spectral index" for each pixel using a weighted sum of log-transformed reflectance bands.
+    # This is a legacy formula designed to highlight changes in vegetation and clearing.
+    # The weights and bands are based on empirical research and legacy code.
     refStart = ref_start
     refEnd = ref_end
 
     spectral_index = (
-        (0.77801094 * np.log1p(refStart[1]))
-        + (1.7713253 * np.log1p(refStart[2]))
-        + (2.0714311 * np.log1p(refStart[4]))
-        + (2.5403550 * np.log1p(refStart[5]))
-        + (-0.2996241 * np.log1p(refEnd[1]))
-        + (-0.5447928 * np.log1p(refEnd[2]))
-        + (-2.2842536 * np.log1p(refEnd[4]))
-        + (-4.0177752 * np.log1p(refEnd[5]))
+        (0.77801094 * np.log1p(refStart[1]))   # Band 2 (Blue)
+        + (1.7713253 * np.log1p(refStart[2]))  # Band 3 (Green)
+        + (2.0714311 * np.log1p(refStart[4]))  # Band 5 (NIR)
+        + (2.5403550 * np.log1p(refStart[5]))  # Band 6 (SWIR)
+        + (-0.2996241 * np.log1p(refEnd[1]))   # Band 2 (Blue, end)
+        + (-0.5447928 * np.log1p(refEnd[2]))   # Band 3 (Green, end)
+        + (-2.2842536 * np.log1p(refEnd[4]))   # Band 5 (NIR, end)
+        + (-4.0177752 * np.log1p(refEnd[5]))   # Band 6 (SWIR, end)
     ).astype(np.float32)
 
-    # Legacy-style tests using NDVI:
-    # s_test: how far observed end NDVI is from the predicted trend (stderr units)
-    # t_test: how far observed end NDVI is from the baseline mean (std units)
+    # Calculate two statistical tests for each pixel:
+    # s_test: How far is the observed end NDVI from the predicted value (based on the trend)?
+    #         Expressed in units of standard error (stderr).
+    # t_test: How far is the observed end NDVI from the baseline mean?
+    #         Expressed in units of standard deviation (std).
     s_test = np.zeros_like(norm_end, dtype=np.float32)
     t_test = np.zeros_like(norm_end, dtype=np.float32)
     valid_stderr = (base_stderr >= 0.2) & ndvi_valid
@@ -1052,7 +1171,9 @@ def main(argv=None) -> int:
         observed_normed_ndvi[valid_std] - base_mean[valid_std]
     ) / base_std[valid_std]
 
-    # Combined index — use the same coefficients as the FC method but substitute NDVI trend
+    # The "combined index" is a weighted sum of the spectral index, NDVI trend, and the two tests above.
+    # This single value is used to decide if a pixel has been cleared or changed.
+    # The weights are legacy values tuned for this application.
     combined_index = (
         -11.972499 * spectral_index
         - 0.40357223 * ndvi_trend
