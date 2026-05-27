@@ -1,26 +1,4 @@
-"""
-task01_inventory_dc4_ndvi_s3.py: Inventory Existing NDVI Outputs in S3
------------------------------------------------------------------------
-
-This module provides a utility function to list all existing NDVI (Normalized Difference Vegetation Index)
-output files for a given tile in an S3 bucket. It is used to quickly determine which NDVI products have
-already been generated, so the pipeline can skip reprocessing and resume efficiently.
-
-Where and how it is called:
-        - This function is typically called by the EDS master pipeline script:
-            `eds_master_pipeline_optimised.py` (step 3: ensure required NDVI scenes exist in S3).
-        - It may also be used by other orchestration or diagnostic scripts that need to check for existing NDVI outputs.
-
-Place in the EDS pipeline:
-        - This script is part of the early pipeline steps, before any new NDVI scenes are generated.
-        - It helps the pipeline avoid redundant work by identifying which NDVI files are already present in S3.
-        - The output (a set of S3 keys) is used to decide which scenes need to be built or skipped.
-"""
-from __future__ import annotations
-
-from typing import Dict, Set
-
-from lib.s3_io import list_s3_keys
+#!/usr/bin/env python3
 
 # ------------------------------------------------------------------------------
 # MIT License
@@ -45,6 +23,33 @@ from lib.s3_io import list_s3_keys
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # ------------------------------------------------------------------------------
+
+"""
+task01_inventory_dc4_ndvi_s3.py: Inventory Existing NDVI Outputs in S3
+-----------------------------------------------------------------------
+
+This module provides a utility function to list all existing NDVI (Normalized Difference Vegetation Index)
+output files for a given tile in an S3 bucket. It is used to quickly determine which NDVI products have
+already been generated, so the pipeline can skip reprocessing and resume efficiently.
+
+Where and how it is called:
+        - This function is typically called by the EDS master pipeline script:
+            `eds_master_pipeline_optimised.py` (step 3: ensure required NDVI scenes exist in S3).
+        - It may also be used by other orchestration or diagnostic scripts that need to check for existing NDVI outputs.
+
+Place in the EDS pipeline:
+        - This script is part of the early pipeline steps, before any new NDVI scenes are generated.
+        - It helps the pipeline avoid redundant work by identifying which NDVI files are already present in S3.
+        - The output (a set of S3 keys) is used to decide which scenes need to be built or skipped.
+"""
+
+from __future__ import annotations
+
+from typing import Dict, Set
+
+from lib.s3_io import list_s3_keys
+
+
 
 
 def inventory_existing_ndvi(
