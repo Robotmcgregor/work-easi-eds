@@ -1,91 +1,120 @@
 #!/usr/bin/env python3
-from __future__ import annotations
+def main():
+    import geopandas as gpd
+    import csv
+    import traceback
+    args = parse_args()
+    if args.run_all_tiles:
+        # Read all tile IDs from the shapefile
+        gdf = gpd.read_file(args.tile_shp)
+        # Try to find path/row columns for Landsat-style tiles
+        path_col = None
+        row_col = None
+        for c in gdf.columns:
+            cl = c.lower()
+            if cl in ('path', 'wrs_path', 'wrs2_path'):
+                path_col = c
+            if cl in ('row', 'wrs_row', 'wrs2_row'):
+                row_col = c
+        tile_col = None
+        for c in gdf.columns:
+            if c.lower() in ('tile', 'tile_id', 'tileid', 'name', 'id'):
+                tile_col = c
+                break
 
-import argparse
-from pathlib import Path
-import math
-from datetime import date as _date, datetime
-import subprocess
-import sys
-from typing import Optional
+        all_tiles = []
+        if path_col and row_col:
+            for _, row in gdf.iterrows():
+                path = int(row[path_col])
+                rownum = int(row[row_col])
+                tile_name = f"p{path:03d}r{rownum:03d}"
+                all_tiles.append(tile_name)
+        elif tile_col:
+            for t in gdf[tile_col].unique():
+                t = str(t).lower().strip()
+                # Try to convert 91_88 or 91-88 to p091r088
+                if '_' in t or '-' in t:
+                    parts = t.replace('-', '_').split('_')
+                    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                        tile_name = f"p{int(parts[0]):03d}r{int(parts[1]):03d}"
+                        all_tiles.append(tile_name)
+                    else:
+                        all_tiles.append(t)
+                else:
+                    all_tiles.append(t)
+        else:
+            raise ValueError('Could not find tile ID or path/row columns in shapefile')
 
-import pandas as pd
+        # Load or create the persistent log
+        log_path = Path(args.all_tiles_log)
+        log = {}
+        if log_path.exists():
+            with open(log_path, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    log[row['tile']] = row
 
-from tasks.task01_inventory_s3 import inventory_existing_outputs
-from tasks.task02_build_scene_manifest import load_or_build_manifest
-from tasks.task03_process_scene_ndvi import process_scene_to_s3
-from lib.s3_io import s3_key_exists
-from lib.run_log import (
-    default_run_log_uri,
-    finish_run_row,
-    last_success_end_date,
-    load_run_log,
-    new_run_row,
-    save_run_log,
-)
+        # Only process tiles not marked as success
+        to_run = [t for t in all_tiles if t not in log or log[t].get('status') != 'success']
+        # Apply offset and max-tiles slicing
+        offset = args.tile_offset or 0
+        max_tiles = args.max_tiles if args.max_tiles is not None else None
+        if offset > 0:
+            to_run = to_run[offset:]
+        if max_tiles is not None:
+            to_run = to_run[:max_tiles]
+        print(f"[BATCH] {len(to_run)} of {len(all_tiles)} tiles to process (resume mode, offset={offset}, max_tiles={max_tiles})")
 
-"""
-Example prompt:
+        for tile in to_run:
+            print(f"[BATCH] Processing tile: {tile}")
+            status = 'unknown'
+            error = ''
+            start_time = datetime.now().isoformat()
+            try:
+                # Patch args for this tile
+                args_tile = argparse.Namespace(**vars(args))
+                args_tile.tile = tile
+                args_tile.run_all_tiles = False
+                # Call main logic for a single tile (recursive, disables --run-all-tiles)
+                run_single_tile(args_tile)
+                status = 'success'
+            except Exception as e:
+                status = 'failed'
+                error = f"{e}\n{traceback.format_exc()}"
+                print(f"[BATCH][ERROR] Tile {tile} failed: {e}")
+            end_time = datetime.now().isoformat()
+            # Update log
+            log[tile] = {
+                'tile': tile,
+                'status': status,
+                'start_time': start_time,
+                'end_time': end_time,
+                'error': error,
+            }
+            # Write log after each tile
+            with open(log_path, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=['tile', 'status', 'start_time', 'end_time', 'error'])
+                writer.writeheader()
+                for row in log.values():
+                    writer.writerow(row)
+        print(f"[BATCH] All tiles processed. Log written to {log_path}")
+        return
 
-python /home/jovyan/work-easi-eds/scripts/easi-scripts/optimised_ndvi/scripts/ndvi_master_pipeline.py \
-  --tile p089r084 \
-  --s3-bucket dcceew-eds-data \
-  --s3-prefix "AROAZ6PFZYT4B4C7MNRHV:robotmcgregor/eds/optimised" \
-  --work-dir /home/jovyan/scratch/eds-work-optimised \
-  --cloud-max 40 \
-  --start-date 2013-01-01 \
-  --end-date 2026-22-17 \
-  --limit 1
-"""
-def parse_args():
-    ap = argparse.ArgumentParser("Optimised NDVI pipeline (datacube-native, COG->S3)")
-    ap.add_argument(
-        '--run-all-tiles',
-        action='store_true',
-        help='Run the pipeline for all tiles in the shapefile (overrides --tile). Supports resume if interrupted.',
+    # --- Single-tile logic below (factored out for batch mode) ---
+    run_single_tile(args)
+
+
+# --- Factored out single-tile logic for batch and direct runs ---
     )
-    ap.add_argument(
-        '--all-tiles-log',
-        default='all_tiles_run_log.csv',
-        help='Path to the persistent log file for --run-all-tiles mode (CSV).',
-    )
-    ap.add_argument(
-        '--max-tiles',
-        type=int,
-        default=None,
-        help='In --run-all-tiles mode, only process the first N tiles (after offset). Useful for batching.',
-    )
-    ap.add_argument(
-        '--tile-offset',
-        type=int,
-        default=0,
-        help='In --run-all-tiles mode, skip the first OFFSET tiles (after resume logic). Useful for batching.',
-    )
-    ap.add_argument(
-        "--cleanup-work-dir",
-        action="store_true",
-        help="Delete the entire run folder in --work-dir after processing completes (use with caution!).",
-    )
-
-    ap.add_argument("--tile", required=False, help="e.g. p089r084")
-
-    ap.add_argument("--s3-bucket", required=True, help="e.g. dcceew-eds-data")
-    ap.add_argument("--s3-prefix", required=True, help="e.g. ARO...:robotmcgregor/eds/optimised")
-
-    ap.add_argument("--work-dir", required=True, help="Local work dir (avoid /scratch if not permitted)")
-
-    ap.add_argument("--tile-shp", default="/home/jovyan/assets/eds_lsat_grid_min_max.shp",
-
-                    help="Tile grid shapefile used to derive bbox/geom for tile")
-
-    ap.add_argument(
-        "--run-log-uri",
-        default=None,
-        help=(
-            "Master parquet file recording tile runs (S3 or local path). "
-            "If omitted, defaults to s3://<bucket>/<prefix>/runs/optimised_ndvi_runs.parquet"
-        ),
-    )
+    from pathlib import Path
+    tile = args.tile.lower()
+    base_work_dir = Path(args.work_dir)
+    work_dir = base_work_dir / tile
+    work_dir.mkdir(parents=True, exist_ok=True)
+    run_log_uri = args.run_log_uri or default_run_log_uri(args.s3_bucket, args.s3_prefix)
+    run_log_cache_dir = work_dir / "run_logs"
+    existing = inventory_existing_outputs(
+        bucket=args.s3_bucket,
 
     ap.add_argument("--start-date", default=None, help="YYYY-MM-DD (optional)")
     ap.add_argument("--end-date", default=None, help="YYYY-MM-DD (optional)")
