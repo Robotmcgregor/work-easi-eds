@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -486,6 +486,7 @@ def resolve_output_epsg(row, cli_target_epsg: int) -> int:
     )
 
 def main():
+    from pathlib import Path
     args = parse_args()
     tile = args.tile.lower()
 
