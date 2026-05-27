@@ -93,6 +93,16 @@ from lib.run_log import (
 
 
 def parse_args():
+    """Parse command-line arguments.
+
+    These flags are grouped roughly as:
+    - What to process: tile, start/end date
+    - Where data lives: S3 bucket/prefix and local work directory
+    - Data quality controls: cloud-max
+    - A/B testing knobs for the legacy method: SR scaling + baseline stats mode
+    - Debugging outputs: --verbose, --diagnostics, --stop-after-dlj
+    """
+    ap = argparse.ArgumentParser('Optimised EDS processing (NDVI seasonal window)')
     ap.add_argument(
         '--max-tiles',
         type=int,
@@ -105,17 +115,6 @@ def parse_args():
         default=0,
         help='In --run-all-tiles mode, skip the first OFFSET tiles (after resume logic). Useful for batching.',
     )
-
-    """Parse command-line arguments.
-
-    These flags are grouped roughly as:
-    - What to process: tile, start/end date
-    - Where data lives: S3 bucket/prefix and local work directory
-    - Data quality controls: cloud-max
-    - A/B testing knobs for the legacy method: SR scaling + baseline stats mode
-    - Debugging outputs: --verbose, --diagnostics, --stop-after-dlj
-    """
-    ap = argparse.ArgumentParser('Optimised EDS processing (NDVI seasonal window)')
     ap.add_argument(
         '--run-all-tiles',
         action='store_true',
