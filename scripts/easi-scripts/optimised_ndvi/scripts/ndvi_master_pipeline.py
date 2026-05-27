@@ -38,6 +38,11 @@ python /home/jovyan/work-easi-eds/scripts/easi-scripts/optimised_ndvi/scripts/nd
   --limit 1
 """
 def parse_args():
+        ap.add_argument(
+            "--cleanup-work-dir",
+            action="store_true",
+            help="Delete the entire run folder in --work-dir after processing completes (use with caution!).",
+        )
     ap = argparse.ArgumentParser("Optimised NDVI pipeline (datacube-native, COG->S3)")
 
     ap.add_argument("--tile", required=True, help="e.g. p089r084")
@@ -680,6 +685,18 @@ def main():
             save_run_log(run_log_df, run_log_uri, run_log_cache_dir)
         except Exception as e:
             print(f"[WARN] Could not finalize run log: {e}")
+
+        # Cleanup run folder if requested and not a dry run
+        try:
+            if getattr(args, "cleanup_work_dir", False) and not getattr(args, "dry_run", False):
+                from pathlib import Path
+                import shutil
+                run_root = Path(args.work_dir) / tile / (args.run_tag or args.run_id or f"{tile}_d{eff_start}{eff_end}")
+                print(f"[CLEANUP] Deleting run folder: {run_root}")
+                shutil.rmtree(run_root, ignore_errors=True)
+                print(f"[CLEANUP] Run folder deleted.")
+        except Exception as e:
+            print(f"[WARN] Cleanup of run folder failed: {e}")
 
 
     print("[DONE] NDVI pipeline finished.")

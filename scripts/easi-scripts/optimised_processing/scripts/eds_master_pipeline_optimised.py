@@ -93,6 +93,11 @@ from lib.run_log import (
 
 
 def parse_args():
+        ap.add_argument(
+            '--cleanup-work-dir',
+            action='store_true',
+            help='Delete the entire run folder in --work-dir after processing completes (use with caution!).',
+        )
     # Reads and interprets all the command-line options the user provides when running this script.
     # Returns an object with all the user's choices (like which tile, dates, and settings to use).
     """Parse command-line arguments.
@@ -1219,6 +1224,16 @@ def main():
             save_run_log(run_log_df, run_log_uri, run_log_cache_dir)
         except Exception as e:
             print(f"[WARN] Could not finalize EDS run log: {e}")
+
+        # Cleanup run folder if requested and not a dry run
+        try:
+            if getattr(args, 'cleanup_work_dir', False) and not getattr(args, 'dry_run', False):
+                run_root = paths["run_root"]
+                print(f"[CLEANUP] Deleting run folder: {run_root}")
+                shutil.rmtree(run_root, ignore_errors=True)
+                print(f"[CLEANUP] Run folder deleted.")
+        except Exception as e:
+            print(f"[WARN] Cleanup of run folder failed: {e}")
 
 
 if __name__ == '__main__':
