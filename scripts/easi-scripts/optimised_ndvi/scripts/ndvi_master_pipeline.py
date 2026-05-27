@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from typing import Optional
+
 def main():
     import geopandas as gpd
     import csv
