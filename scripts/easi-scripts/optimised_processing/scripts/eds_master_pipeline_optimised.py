@@ -93,13 +93,7 @@ from lib.run_log import (
 
 
 def parse_args():
-        ap.add_argument(
-            '--cleanup-work-dir',
-            action='store_true',
-            help='Delete the entire run folder in --work-dir after processing completes (use with caution!).',
-        )
-    # Reads and interprets all the command-line options the user provides when running this script.
-    # Returns an object with all the user's choices (like which tile, dates, and settings to use).
+
     """Parse command-line arguments.
 
     These flags are grouped roughly as:
@@ -110,6 +104,11 @@ def parse_args():
     - Debugging outputs: --verbose, --diagnostics, --stop-after-dlj
     """
     ap = argparse.ArgumentParser('Optimised EDS processing (NDVI seasonal window)')
+    ap.add_argument(
+        '--cleanup-work-dir',
+        action='store_true',
+        help='Delete the entire run folder in --work-dir after processing completes (use with caution!).',
+    )
 
     ap.add_argument('--tile', required=True, help='e.g. p115r078')
     ap.add_argument('--start-date', required=True, help='YYYY-MM-DD')
