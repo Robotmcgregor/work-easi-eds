@@ -38,12 +38,13 @@ python /home/jovyan/work-easi-eds/scripts/easi-scripts/optimised_ndvi/scripts/nd
   --limit 1
 """
 def parse_args():
-        ap.add_argument(
-            "--cleanup-work-dir",
-            action="store_true",
-            help="Delete the entire run folder in --work-dir after processing completes (use with caution!).",
-        )
+
     ap = argparse.ArgumentParser("Optimised NDVI pipeline (datacube-native, COG->S3)")
+    ap.add_argument(
+        "--cleanup-work-dir",
+        action="store_true",
+        help="Delete the entire run folder in --work-dir after processing completes (use with caution!).",
+    )
 
     ap.add_argument("--tile", required=True, help="e.g. p089r084")
 
