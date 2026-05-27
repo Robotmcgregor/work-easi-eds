@@ -6,7 +6,6 @@ from lib.s3_io import list_s3_keys
 
 def inventory_existing_outputs(bucket: str, prefix: str, tile: str) -> List[str]:
     """
-    Very basic inventory helper.
     Just lists NDVI outputs that already exist in S3 so we dont redo work.
     """
     # build the base path where ndvi files should be

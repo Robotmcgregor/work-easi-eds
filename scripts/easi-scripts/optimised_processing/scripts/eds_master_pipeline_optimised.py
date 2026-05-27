@@ -1,11 +1,35 @@
-#!/usr/bin/env python3
-from __future__ import annotations
+!/usr/bin/env python3
+
+# ------------------------------------------------------------------------------
+# MIT License
+
+# Copyright (c) 2026 Robert McGregor
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# ------------------------------------------------------------------------------
+
 
 """Optimised EDS processing pipeline (NDVI seasonal-window; datacube-native).
 
 This file is the *main entrypoint* people run.
 
-In plain English, it:
+The script:
 1) Picks a "best" start and end Landsat SR scene for your requested dates.
 2) Builds a list of NDVI scenes in a seasonal window (baseline time-series).
 3) Ensures NDVI scenes exist in S3 (builds them if missing).
@@ -35,6 +59,8 @@ S3 layout:
     Final run outputs:
         {s3_prefix}/tiles/{tile}/outputs/{run_tag}/...
 """
+
+from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
@@ -67,6 +93,8 @@ from lib.run_log import (
 
 
 def parse_args():
+    # Reads and interprets all the command-line options the user provides when running this script.
+    # Returns an object with all the user's choices (like which tile, dates, and settings to use).
     """Parse command-line arguments.
 
     These flags are grouped roughly as:
@@ -219,11 +247,13 @@ def parse_args():
 
 
 def _default_run_manifest_uri(bucket: str, prefix: str, tile: str, run_tag: str) -> str:
+    # Builds the default S3 path for saving the run manifest file, based on user input.
     prefix = prefix.strip('/')
     return f"s3://{bucket}/{prefix}/runs/manifests/{tile}/{run_tag}_manifest.parquet"
 
 
 def _upload_run_diagnostics_to_s3(
+    # Uploads all diagnostic files (like logs or plots) for a run to a special folder in S3.
     *,
     diagnostics_dir: Path,
     bucket: str,
@@ -255,6 +285,7 @@ def _upload_run_diagnostics_to_s3(
 
 
 def _print_raster_stats(path: Path, label: str) -> None:
+    # Prints out simple statistics about a raster image file, mainly for debugging or checking results.
     """Print lightweight stats for a raster (intended for DLJ/DLL debugging)."""
     try:
         import numpy as np  # type: ignore[import-not-found]
@@ -300,6 +331,7 @@ def _print_raster_stats(path: Path, label: str) -> None:
 
 
 def _dlj_has_any_valid_pixels(path: Path) -> bool:
+    # Checks if a raster image has any real (non-empty) data in it. Returns True if there is any valid data.
     """Return True if a raster has any non-nodata pixel in any band.
 
     For these products, nodata is typically encoded as 0.
@@ -326,59 +358,42 @@ def _dlj_has_any_valid_pixels(path: Path) -> bool:
     return False
 
 
-@dataclass(frozen=True)
-class RunPaths:
-    """All folders used for a single run.
 
-    A *run* is identified by tile + run_tag.
-    Keeping run folders separate makes it easy to:
-    - run the same tile multiple times without overwriting outputs
-    - compare different settings (e.g. SR scaling) side-by-side
+# --- Procedural replacement for RunPaths class ---
+def make_run_paths(args, tile, run_tag):
     """
-    run_root: Path
-    ndvi_work: Path
-    ga1_stage: Path
-    ga0_work: Path
-    legacy_outputs: Path
-    outputs_cog: Path
-    maskvec_work: Path
-    diagnostics: Path
-    sr_raw_cog: Path
+    Returns a dictionary with all the folder paths for this run.
+    Each key is a folder name, value is a Path object.
+    """
+    run_root = Path(args.work_dir) / tile / run_tag
+    return {
+        "run_root": run_root,
+        "ndvi_work": run_root / 'ndvi_work',
+        "ga1_stage": run_root / 'ga1_stage',
+        "ga0_work": run_root / 'ga0_work',
+        "legacy_outputs": run_root / 'legacy_outputs',
+        "outputs_cog": run_root / 'outputs_cog',
+        "maskvec_work": run_root / 'maskvec_work',
+        "diagnostics": run_root / 'diagnostics',
+        "sr_raw_cog": run_root / args.export_sr_raw_cog_dirname,
+    }
 
-    @classmethod
-    def from_args(cls, args, tile: str, run_tag: str) -> 'RunPaths':
-        run_root = Path(args.work_dir) / tile / run_tag
-        return cls(
-            run_root=run_root,
-            ndvi_work=run_root / 'ndvi_work',
-            ga1_stage=run_root / 'ga1_stage',
-            ga0_work=run_root / 'ga0_work',
-            legacy_outputs=run_root / 'legacy_outputs',
-            outputs_cog=run_root / 'outputs_cog',
-            maskvec_work=run_root / 'maskvec_work',
-            diagnostics=run_root / 'diagnostics',
-            sr_raw_cog=run_root / args.export_sr_raw_cog_dirname,
-        )
-
-    def ensure_directories(self, include_sr_raw_cog: bool = False) -> None:
-        directories = [
-            self.run_root,
-            self.ndvi_work,
-            self.ga1_stage,
-            self.ga0_work,
-            self.legacy_outputs,
-            self.outputs_cog,
-            self.maskvec_work,
-            self.diagnostics,
-        ]
-        if include_sr_raw_cog:
-            directories.append(self.sr_raw_cog)
-
-        for directory in directories:
-            directory.mkdir(parents=True, exist_ok=True)
+def ensure_directories(paths, include_sr_raw_cog=False):
+    """
+    Makes sure all the folders for this run exist on disk.
+    """
+    keys = [
+        "run_root", "ndvi_work", "ga1_stage", "ga0_work", "legacy_outputs",
+        "outputs_cog", "maskvec_work", "diagnostics"
+    ]
+    if include_sr_raw_cog:
+        keys.append("sr_raw_cog")
+    for key in keys:
+        paths[key].mkdir(parents=True, exist_ok=True)
 
 
 def _copy_run_artifact(src: Path, dst_dir: Path) -> Path:
+    # Copies a file into a run's folder, used for saving extra outputs or exports.
     """Copy a file into a run folder (used for optional exports)."""
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / src.name
@@ -388,12 +403,14 @@ def _copy_run_artifact(src: Path, dst_dir: Path) -> Path:
 
 
 def _norm_yyyymmdd(iso: str) -> str:
+    # Changes a date from 'YYYY-MM-DD' to 'YYYYMMDD' format for internal use.
     """Convert YYYY-MM-DD into YYYYMMDD (the pipeline's internal date format)."""
     y, m, d = iso.split('-')
     return f'{y}{m}{d}'
 
 
 def _extract_epsg(value) -> int | None:
+    # Tries to pull out an EPSG code (a number that describes a map projection) from different types of input.
     """Try to pull an EPSG code out of a variety of values.
 
     This exists because some inputs come from shapefiles/metadata where CRS may be
@@ -424,6 +441,7 @@ def _extract_epsg(value) -> int | None:
 
 
 def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
+    # Figures out the correct UTM zone (a type of map projection) for a given longitude and latitude.
     """Given a lon/lat point, return the WGS84 UTM EPSG code for that location."""
     zone = int(math.floor((lon + 180.0) / 6.0) + 1)
     if lat >= 0:
@@ -432,6 +450,7 @@ def derive_target_epsg_wgs84_utm_from_lonlat(lon: float, lat: float) -> int:
 
 
 def resolve_output_epsg_from_row(row, cli_target_epsg: int) -> int:
+    # Decides which map projection (EPSG code) to use for a scene, based on user input or the data itself.
     """Choose the output CRS (EPSG code) for a scene.
 
     Priority order:
@@ -471,6 +490,8 @@ def resolve_output_epsg_from_row(row, cli_target_epsg: int) -> int:
 
 
 def main():
+    # This is the main function that runs the entire pipeline for one tile and one start/end date pair.
+    # It coordinates all the steps: picking images, building plans, running processing, saving results, and logging.
     """Run the pipeline end-to-end for one tile and one start/end date pair."""
     args = parse_args()
     tile = args.tile.lower().strip()
@@ -479,10 +500,11 @@ def main():
     ed = _norm_yyyymmdd(args.end_date)
     run_tag = args.run_tag or args.run_id or f'{tile}_d{sd}{ed}'
 
-    paths = RunPaths.from_args(args, tile=tile, run_tag=run_tag)
-    paths.ensure_directories(include_sr_raw_cog=bool(args.export_sr_raw_cog))
+    # Create all run folder paths as a dictionary
+    paths = make_run_paths(args, tile, run_tag)
+    ensure_directories(paths, include_sr_raw_cog=bool(args.export_sr_raw_cog))
 
-    print(f'[INFO] Local run root: {paths.run_root}')
+    print(f'[INFO] Local run root: {paths["run_root"]}')
     print(f"[INFO] Run outputs S3 prefix: {args.s3_prefix.rstrip('/')}/tiles/{tile}/outputs/{run_tag}")
 
     run_log_uri = args.run_log_uri or default_run_log_uri(args.s3_bucket, args.s3_prefix)
@@ -522,24 +544,75 @@ def main():
         s3_bucket=args.s3_bucket,
         s3_prefix=args.s3_prefix,
     )
+    # Extract the current run ID from the run metadata row
     run_id = run_row['run_id']
 
     try:
+        # If the run log DataFrame does not exist or if it  is empty,
+        # create a new DF using the current run row.
         if run_log_df is None or run_log_df.empty:
             run_log_df = pd.DataFrame([run_row])
         else:
-            run_log_df = pd.concat([run_log_df, pd.DataFrame([run_row])], ignore_index=True)
+            # Else append the current run row to the existing log file.
+            run_log_df = pd.concat(
+                [run_log_df, pd.DataFrame([run_row])],
+                ignore_index=True
+            )
+
+        # Save the updated run log to run_log_cache_dir location
         save_run_log(run_log_df, run_log_uri, run_log_cache_dir)
+
     except Exception as e:
+        # Warn if the run log could not be written,
+        # but continue execution without crashing the pipeline
         print(f"[WARN] Could not write running EDS run-log row: {e}")
 
+    # Placeholder for any runtime error message captured later
     error_message: Optional[str] = None
+
+    # Default final status for the run
+    # (can later be changed to 'failed', 'partial', etc.)
     final_status = 'success'
 
+    # # ------------------------------------------------------------------
+    # # STEP 1: Pick the best SR start/end scenes.
+    # # We may not get the exact dates requested: the resolver picks the closest
+    # # acceptable (low cloud) scene around your requested start/end.
+    # # ------------------------------------------------------------------
+    # try:
+    #     sr = resolve_sr_start_end(
+    #         tile=tile,
+    #         tile_shp=args.tile_shp,
+    #         products=args.sr_products,
+    #         cloud_max=float(args.cloud_max),
+    #         start_date=args.start_date,
+    #         end_date=args.end_date,
+    #     )
+
+    #     sr_start_epsg = resolve_output_epsg_from_row(sr.start_row, args.target_epsg)
+    #     sr_end_epsg = resolve_output_epsg_from_row(sr.end_row, args.target_epsg)
+
+    #     sr.start_row['target_epsg'] = int(sr_start_epsg)
+    #     sr.end_row['target_epsg'] = int(sr_end_epsg)
+
+    #     print(f'[INFO] Forced SR start target_epsg: {sr_start_epsg}')
+    #     print(f'[INFO] Forced SR end   target_epsg: {sr_end_epsg}')
+
+    #     eff_sd = normalise_yyyymmdd(sr.start_row.date)
+    #     eff_ed = normalise_yyyymmdd(sr.end_row.date)
+
+    #     # update effective window in the run row
+    #     run_row['effective_start_yyyymmdd'] = eff_sd
+    #     run_row['effective_end_yyyymmdd'] = eff_ed
+
+    #     print(f"[INFO] Effective SR start: {eff_sd} (product={sr.start_row['product']}, cloud={float(sr.start_row['cloud']):.2f})")
+    #     print(f"[INFO] Effective SR end:   {eff_ed} (product={sr.end_row['product']}, cloud={float(sr.end_row['cloud']):.2f})")
+
+
     # ------------------------------------------------------------------
-    # STEP 1: Pick the best SR start/end scenes.
-    # We may not get the exact dates requested: the resolver picks the closest
-    # acceptable (low cloud) scene around your requested start/end.
+    # STEP 1: Find the best SR start/end scenes for this run.
+    # Usually won't be exact dates requested, just closest valid scenes
+    # with cloud under threshold etc.
     # ------------------------------------------------------------------
     try:
         sr = resolve_sr_start_end(
@@ -551,28 +624,107 @@ def main():
             end_date=args.end_date,
         )
 
+        # force output epsg from the rows unless overridden
         sr_start_epsg = resolve_output_epsg_from_row(sr.start_row, args.target_epsg)
         sr_end_epsg = resolve_output_epsg_from_row(sr.end_row, args.target_epsg)
 
+        # save target epsg onto rows so for latter use
         sr.start_row['target_epsg'] = int(sr_start_epsg)
         sr.end_row['target_epsg'] = int(sr_end_epsg)
 
         print(f'[INFO] Forced SR start target_epsg: {sr_start_epsg}')
         print(f'[INFO] Forced SR end   target_epsg: {sr_end_epsg}')
 
+        # normalise dates to YYYYMMDD format for logging / filenames
         eff_sd = normalise_yyyymmdd(sr.start_row.date)
         eff_ed = normalise_yyyymmdd(sr.end_row.date)
 
-        # update effective window in the run row
+        # update effective dates in run log row
+        # these can differ from requested dates
         run_row['effective_start_yyyymmdd'] = eff_sd
         run_row['effective_end_yyyymmdd'] = eff_ed
 
-        print(f"[INFO] Effective SR start: {eff_sd} (product={sr.start_row['product']}, cloud={float(sr.start_row['cloud']):.2f})")
-        print(f"[INFO] Effective SR end:   {eff_ed} (product={sr.end_row['product']}, cloud={float(sr.end_row['cloud']):.2f})")
+        print(
+            f"[INFO] Effective SR start: {eff_sd} "
+            f"(product={sr.start_row['product']}, "
+            f"cloud={float(sr.start_row['cloud']):.2f})"
+        )
+
+        print(
+            f"[INFO] Effective SR end:   {eff_ed} "
+            f"(product={sr.end_row['product']}, "
+            f"cloud={float(sr.end_row['cloud']):.2f})"
+        )
+
+        # # ------------------------------------------------------------------
+        # # STEP 2: Build the seasonal NDVI baseline plan.
+        # # This is the list of NDVI scenes we want to use as the baseline time-series.
+        # # ------------------------------------------------------------------
+        # plan = build_seasonal_ndvi_plan(
+        #     tile=tile,
+        #     tile_shp=args.tile_shp,
+        #     products=args.ndvi_products,
+        #     cloud_max=float(args.cloud_max),
+        #     start_yyyymmdd=eff_sd,
+        #     end_yyyymmdd=eff_ed,
+        #     lookback_years=int(args.lookback),
+        #     target_epsg=int(args.target_epsg),
+        # )
+
+        # # Write a run-scoped manifest parquet (baseline plan + SR picks).
+        # # This is the authoritative manifest for the EDS run.
+        # try:
+        #     ensure_pyarrow()
+        #     manifest_df = plan.required_rows.copy()
+        #     manifest_df['run_id'] = str(run_id)
+        #     manifest_df['run_tag'] = str(run_tag)
+        #     manifest_df['requested_start_yyyymmdd'] = str(sd)
+        #     manifest_df['requested_end_yyyymmdd'] = str(ed)
+        #     manifest_df['effective_sr_start_yyyymmdd'] = str(eff_sd)
+        #     manifest_df['effective_sr_end_yyyymmdd'] = str(eff_ed)
+        #     manifest_df['seasonal_window_start_mmdd'] = str(plan.window.window_start_mmdd)
+        #     manifest_df['seasonal_window_end_mmdd'] = str(plan.window.window_end_mmdd)
+        #     manifest_df['sr_start_product'] = str(sr.start_row['product'])
+        #     manifest_df['sr_end_product'] = str(sr.end_row['product'])
+        #     manifest_df['sr_start_platform'] = str(sr.start_row['platform'])
+        #     manifest_df['sr_end_platform'] = str(sr.end_row['platform'])
+        #     manifest_df['sr_start_cloud'] = float(sr.start_row['cloud'])
+        #     manifest_df['sr_end_cloud'] = float(sr.end_row['cloud'])
+
+        #     local_manifest = paths["run_root"] / 'run_manifest.parquet'
+        #     manifest_df.to_parquet(str(local_manifest), index=False)
+
+        #     if str(run_manifest_uri).startswith('s3://'):
+        #         b, k = parse_s3_uri(str(run_manifest_uri))
+        #         upload_file_to_s3(str(local_manifest), bucket=b, key=k)
+        #         print(f"[OK] Run manifest uploaded -> s3://{b}/{k}")
+        #     else:
+        #         Path(str(run_manifest_uri)).parent.mkdir(parents=True, exist_ok=True)
+        #         Path(str(local_manifest)).replace(str(run_manifest_uri))
+        #         print(f"[OK] Run manifest written -> {run_manifest_uri}")
+        # except Exception as e:
+        #     print(f"[WARN] Could not write run manifest parquet: {e}")
+
+        # if len(plan.required_rows) > 0:
+        #     plan.required_rows['target_epsg'] = plan.required_rows.apply(
+        #         lambda r: derive_target_epsg_wgs84_utm_from_lonlat(
+        #             (float(r['lon_min']) + float(r['lon_max'])) / 2.0,
+        #             (float(r['lat_min']) + float(r['lat_max'])) / 2.0,
+        #         ) if not (args.target_epsg and int(args.target_epsg) > 0)
+        #         else int(args.target_epsg),
+        #         axis=1,
+        #     )
+
+        # print('[DEBUG] NDVI plan target_epsg sample:')
+        # print(plan.required_rows[['date', 'platform', 'target_epsg']].head())
+        # print(f'[INFO] Seasonal window: {plan.window.window_start_mmdd} -> {plan.window.window_end_mmdd} (months {plan.window.months_hint()})')
+        # print(f'[INFO] NDVI scenes in seasonal plan: {len(plan.required_rows)}')
+
 
         # ------------------------------------------------------------------
-        # STEP 2: Build the seasonal NDVI baseline plan.
-        # This is the list of NDVI scenes we want to use as the baseline time-series.
+        # STEP 2: Build seasonal NDVI baseline plan.
+        # Basically figure out which NDVI scenes we want across lookback years
+        # for the seasonal baseline stack.
         # ------------------------------------------------------------------
         plan = build_seasonal_ndvi_plan(
             tile=tile,
@@ -585,65 +737,149 @@ def main():
             target_epsg=int(args.target_epsg),
         )
 
-        # Write a run-scoped manifest parquet (baseline plan + SR picks).
-        # This is the authoritative manifest for the EDS run.
+        # write run-level manifest parquet
+        # this acts as the main "what happened in this run" record
         try:
             ensure_pyarrow()
+
+            # copy rows so we don't mutate original dataframe accidentally
             manifest_df = plan.required_rows.copy()
+
+            # attach extra run metadata onto every row
             manifest_df['run_id'] = str(run_id)
             manifest_df['run_tag'] = str(run_tag)
+
+            # requested dates from cli
             manifest_df['requested_start_yyyymmdd'] = str(sd)
             manifest_df['requested_end_yyyymmdd'] = str(ed)
+
+            # actual SR dates selected after cloud/date filtering
             manifest_df['effective_sr_start_yyyymmdd'] = str(eff_sd)
             manifest_df['effective_sr_end_yyyymmdd'] = str(eff_ed)
+
+            # seasonal window info used for baseline
             manifest_df['seasonal_window_start_mmdd'] = str(plan.window.window_start_mmdd)
             manifest_df['seasonal_window_end_mmdd'] = str(plan.window.window_end_mmdd)
+
+            # keep SR scene metadata for traceability - debug
             manifest_df['sr_start_product'] = str(sr.start_row['product'])
             manifest_df['sr_end_product'] = str(sr.end_row['product'])
+
             manifest_df['sr_start_platform'] = str(sr.start_row['platform'])
             manifest_df['sr_end_platform'] = str(sr.end_row['platform'])
+
             manifest_df['sr_start_cloud'] = float(sr.start_row['cloud'])
             manifest_df['sr_end_cloud'] = float(sr.end_row['cloud'])
 
-            local_manifest = paths.run_root / 'run_manifest.parquet'
+            # temp local parquet before pushing to final location
+            local_manifest = paths["run_root"] / 'run_manifest.parquet'
+
             manifest_df.to_parquet(str(local_manifest), index=False)
 
+            # upload to 3s
             if str(run_manifest_uri).startswith('s3://'):
                 b, k = parse_s3_uri(str(run_manifest_uri))
-                upload_file_to_s3(str(local_manifest), bucket=b, key=k)
+
+                upload_file_to_s3(
+                    str(local_manifest),
+                    bucket=b,
+                    key=k
+                )
+
                 print(f"[OK] Run manifest uploaded -> s3://{b}/{k}")
+
             else:
-                Path(str(run_manifest_uri)).parent.mkdir(parents=True, exist_ok=True)
+                # otherwise just move it to home dir
+                Path(str(run_manifest_uri)).parent.mkdir(
+                    parents=True,
+                    exist_ok=True
+                )
+
                 Path(str(local_manifest)).replace(str(run_manifest_uri))
+
                 print(f"[OK] Run manifest written -> {run_manifest_uri}")
+
         except Exception as e:
+            # don't hard fail pipeline if manifest write dies
             print(f"[WARN] Could not write run manifest parquet: {e}")
 
+        # assign target epsg for every NDVI scene
+        # if user didn't force epsg, derive from scene centroid
         if len(plan.required_rows) > 0:
+
             plan.required_rows['target_epsg'] = plan.required_rows.apply(
                 lambda r: derive_target_epsg_wgs84_utm_from_lonlat(
                     (float(r['lon_min']) + float(r['lon_max'])) / 2.0,
                     (float(r['lat_min']) + float(r['lat_max'])) / 2.0,
-                ) if not (args.target_epsg and int(args.target_epsg) > 0)
+                )
+
+                # otherwise just use forced epsg from args
+                if not (args.target_epsg and int(args.target_epsg) > 0)
                 else int(args.target_epsg),
+
                 axis=1,
             )
 
         print('[DEBUG] NDVI plan target_epsg sample:')
-        print(plan.required_rows[['date', 'platform', 'target_epsg']].head())
-        print(f'[INFO] Seasonal window: {plan.window.window_start_mmdd} -> {plan.window.window_end_mmdd} (months {plan.window.months_hint()})')
-        print(f'[INFO] NDVI scenes in seasonal plan: {len(plan.required_rows)}')
+
+        # Print items for checking
+        print(
+            plan.required_rows[
+                ['date', 'platform', 'target_epsg']
+            ].head()
+        )
+
+        print(
+            f'[INFO] Seasonal window: '
+            f' - {plan.window.window_start_mmdd} -> '
+            f' - {plan.window.window_end_mmdd} '
+            f' - (months {plan.window.months_hint()})'
+        )
+
+        print(
+            f'[INFO] NDVI scenes in seasonal plan: '
+            f' -- {len(plan.required_rows)}'
+        )
+
+        # # ------------------------------------------------------------------
+        # # STEP 3: Ensure required NDVI scenes exist in S3.
+        # # If a required NDVI scene is missing (or --rebase is set), it is computed.
+        # # ------------------------------------------------------------------
+        # ensure_seasonal_ndvi_in_s3(
+        #     plan=plan,
+        #     tile=tile,
+        #     bucket=args.s3_bucket,
+        #     prefix=args.s3_prefix,
+        #     work_dir=paths["ndvi_work"],
+        #     cloud_max=float(args.cloud_max),
+        #     resolution=float(args.resolution),
+        #     rebase=bool(args.rebase),
+        #     dry_run=bool(args.dry_run),
+        #     dask_chunk=int(args.chunk),
+        # )
+
+        # required_dates = []
+        # for r in plan.required_rows.itertuples(index=False):
+        #     required_dates.append((normalise_yyyymmdd(r.date), str(r.platform), int(str(r.target_epsg))))
+
+        # if args.dry_run:
+        #     print('[DRY] Skipping ga1 NDVI staging (download).')
+        #     print('[DRY] Skipping ga0 SR build.')
+        #     print('[DRY] Skipping legacy method run + output conversion.')
+        #     final_status = 'dry_run'
+        #     return
+
 
         # ------------------------------------------------------------------
-        # STEP 3: Ensure required NDVI scenes exist in S3.
-        # If a required NDVI scene is missing (or --rebase is set), it is computed.
+        # STEP 3: Make sure the NDVI scenes we need are actually in S3.
+        # Missing scenes get built here, or rebuilt if --rebase was passed.
         # ------------------------------------------------------------------
         ensure_seasonal_ndvi_in_s3(
             plan=plan,
             tile=tile,
             bucket=args.s3_bucket,
             prefix=args.s3_prefix,
-            work_dir=paths.ndvi_work,
+            work_dir=paths["ndvi_work"],
             cloud_max=float(args.cloud_max),
             resolution=float(args.resolution),
             rebase=bool(args.rebase),
@@ -651,14 +887,26 @@ def main():
             dask_chunk=int(args.chunk),
         )
 
+        # keep a simple list of required NDVI dates/platform/epsg combos
+        # used later when staging the ga1 NDVI files
         required_dates = []
-        for r in plan.required_rows.itertuples(index=False):
-            required_dates.append((normalise_yyyymmdd(r.date), str(r.platform), int(str(r.target_epsg))))
 
+        for r in plan.required_rows.itertuples(index=False):
+            required_dates.append(
+                (
+                    normalise_yyyymmdd(r.date),  # scene date as YYYYMMDD
+                    str(r.platform),             # landsat platform/sensor
+                    int(str(r.target_epsg)),      # output projection for this scene
+                )
+            )
+
+        # dry run stops here after planning/checking
+        # nothing heavy gets downloaded or processed
         if args.dry_run:
             print('[DRY] Skipping ga1 NDVI staging (download).')
             print('[DRY] Skipping ga0 SR build.')
             print('[DRY] Skipping legacy method run + output conversion.')
+
             final_status = 'dry_run'
             return
 
@@ -671,7 +919,7 @@ def main():
             prefix=args.s3_prefix,
             tile=tile,
             required_dates=required_dates,
-            work_dir=paths.ga1_stage,
+            work_dir=paths["ga1_stage"],
             dry_run=bool(args.dry_run),
         )
 
@@ -692,7 +940,7 @@ def main():
             cloud_max=float(args.cloud_max),
             bucket=args.s3_bucket,
             s3_prefix=args.s3_prefix,
-            work_dir=paths.ga0_work,
+            work_dir=paths["ga0_work"],
             resolution=float(args.resolution),
             dask_chunk=int(args.chunk),
             rebase=bool(args.rebase),
@@ -712,7 +960,7 @@ def main():
             cloud_max=float(args.cloud_max),
             bucket=args.s3_bucket,
             s3_prefix=args.s3_prefix,
-            work_dir=paths.ga0_work,
+            work_dir=paths["ga0_work"],
             resolution=float(args.resolution),
             dask_chunk=int(args.chunk),
             rebase=bool(args.rebase),
@@ -725,8 +973,8 @@ def main():
         print('ga0_end exists:', Path(ga0_end.local_clr_path).exists())
 
         if args.export_sr_raw_cog:
-            exported_start = _copy_run_artifact(Path(ga0_start.local_raw_path), paths.sr_raw_cog)
-            exported_end = _copy_run_artifact(Path(ga0_end.local_raw_path), paths.sr_raw_cog)
+            exported_start = _copy_run_artifact(Path(ga0_start.local_raw_path), paths["sr_raw_cog"])
+            exported_end = _copy_run_artifact(Path(ga0_end.local_raw_path), paths["sr_raw_cog"])
             print(f'[SR-RAW-COG] start -> {exported_start}')
             print(f'[SR-RAW-COG] end   -> {exported_end}')
 
@@ -737,7 +985,7 @@ def main():
         # STEP 6: Run the legacy seasonal-window change detection method.
         # This produces:
         # - DLL: change "class" raster (integers like 10, 34..39)
-        # - DLJ: interpretation raster (multiple bands including clearing probability)
+        # - DLJ: interpretation raster (four bands -clearing probability etc....)
         # ------------------------------------------------------------------
         outputs = run_legacy_ndvi_window(
             methods_dir=Path(__file__).parent / 'methods',
@@ -756,11 +1004,11 @@ def main():
             sr_scale=args.legacy_sr_scale,
             no_auto_sr_scale=bool(args.legacy_no_auto_sr_scale),
             baseline_include_nodata=bool(args.legacy_baseline_include_nodata),
-            output_dir=paths.legacy_outputs,
-            diagnostics_dir=paths.diagnostics,
+            output_dir=paths["legacy_outputs"],
+            diagnostics_dir=paths["diagnostics"],
         )
 
-        print(f"[INFO] Legacy outputs dir: {paths.legacy_outputs}")
+        print(f"[INFO] Legacy outputs dir: {paths['legacy_outputs']}")
         print(f"[INFO] Legacy DLL (change class): {outputs.dll_img}")
         print(f"[INFO] Legacy DLJ (interpretation): {outputs.dlj_img}")
 
@@ -802,7 +1050,7 @@ def main():
             prefix=args.s3_prefix,
             tile=tile,
             run_tag=run_tag,
-            work_dir=paths.outputs_cog,
+            work_dir=paths["outputs_cog"],
         )
 
         if bool(args.dlj_troubleshoot):
@@ -822,7 +1070,7 @@ def main():
 
         # ------------------------------------------------------------------
         # STEP 8: Create masks + shapefiles.
-        # These are the outputs most people use for area summaries and QA.
+        # These are the final outputs.
         # ------------------------------------------------------------------
         mv = make_masks_and_vectors(
             dljmz_cog_local=dljmz_cog_local,
@@ -833,7 +1081,7 @@ def main():
             strong_threshold=int(args.strong_threshold),
             clear_threshold=int(args.clear_threshold),
             min_area_ha=float(args.min_area_ha),
-            work_dir=paths.maskvec_work,
+            work_dir=paths["maskvec_work"],
             rebase=bool(args.rebase),
             dry_run=bool(args.dry_run),
         )
@@ -849,7 +1097,7 @@ def main():
             try:
                 import shutil
 
-                src_vectors = paths.maskvec_work / 'vectors'
+                src_vectors = paths["maskvec_work"] / 'vectors'
                 dst_vectors = Path(args.work_dir) / 'vectors' / tile / run_tag
 
                 if bool(args.rebase) and dst_vectors.exists():
@@ -874,7 +1122,7 @@ def main():
         # ------------------------------------------------------------------
         if bool(args.diagnostics) and (not bool(args.dry_run)):
             uploaded_diags = _upload_run_diagnostics_to_s3(
-                diagnostics_dir=paths.diagnostics,
+                diagnostics_dir=paths["diagnostics"],
                 bucket=args.s3_bucket,
                 s3_prefix=args.s3_prefix,
                 tile=tile,
@@ -899,8 +1147,8 @@ def main():
             ]
             mask_files = [Path(mv.strong_mask_local), Path(mv.clear_mask_local)]
             vector_dirs = [
-                paths.maskvec_work / 'vectors' / 'strong',
-                paths.maskvec_work / 'vectors' / 'clear',
+                paths["maskvec_work"] / 'vectors' / 'strong',
+                paths["maskvec_work"] / 'vectors' / 'clear',
             ]
 
             home_copy = copy_run_to_home(
@@ -919,10 +1167,9 @@ def main():
             )
 
             if bool(args.dlj_troubleshoot) and (not bool(args.dry_run)):
-                # Re-open the *home-copied* DLJ products and dump stats so ArcGIS users
-                # can trust the artefacts they download.
+                # Re-open the *home-copied* DLJ products and dump stats
                 try:
-                    copied_tifs = [
+                    copied_tifs = [ 
                         p for p in home_copy.copied
                         if p.suffix.lower() in {'.tif', '.tiff'}
                         and p.parent.name in {'legacy_outputs', 'cog_outputs'}

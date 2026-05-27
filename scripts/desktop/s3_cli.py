@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # Import the existing handlers from the main CLI
-from scripts.eds_cli import (
+from scripts.desktop.eds_cli import (
     cmd_list_s3,
     cmd_fetch_inputs,
     cmd_download_s3,
