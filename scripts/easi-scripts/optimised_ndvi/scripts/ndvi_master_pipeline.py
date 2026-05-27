@@ -38,6 +38,7 @@ python /home/jovyan/work-easi-eds/scripts/easi-scripts/optimised_ndvi/scripts/nd
   --limit 1
 """
 def parse_args():
+    ap = argparse.ArgumentParser("Optimised NDVI pipeline (datacube-native, COG->S3)")
     ap.add_argument(
         '--run-all-tiles',
         action='store_true',
@@ -60,8 +61,6 @@ def parse_args():
         default=0,
         help='In --run-all-tiles mode, skip the first OFFSET tiles (after resume logic). Useful for batching.',
     )
-
-    ap = argparse.ArgumentParser("Optimised NDVI pipeline (datacube-native, COG->S3)")
     ap.add_argument(
         "--cleanup-work-dir",
         action="store_true",
