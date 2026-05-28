@@ -738,7 +738,37 @@ def main():
         to_run = to_run[offset:]
     if max_tiles is not None:
         to_run = to_run[:max_tiles]
-    print(f"[BATCH] {len(to_run)} of {len(all_tiles)} tiles to process (resume mode, offset={offset}, max_tiles={max_tiles})")
+    # ── Pre-run summary ──────────────────────────────────────────────────────
+    print()
+    print("=" * 64)
+    print("  NDVI BATCH RUN SUMMARY")
+    print("=" * 64)
+    print(f"  Shapefile     : {args.tile_shp}")
+    print(f"  S3 bucket     : s3://{args.s3_bucket}/{args.s3_prefix}")
+    print(f"  Work dir      : {args.work_dir}")
+    print(f"  Date range    : {args.start_date}  →  {getattr(args, 'end_date', 'auto')}")
+    print(f"  Cloud max     : {args.cloud_max}%")
+    print(f"  Chunk         : {args.chunk}")
+    print(f"  Run EDS after : {getattr(args, 'run_eds_after', False)}")
+    print(f"  Total tiles in shapefile : {len(all_tiles)}")
+    print(f"  Already done  : {len(all_tiles) - len([t for t in all_tiles if t not in log or log[t].get('status') != 'success'])}")
+    print(f"  Offset        : {offset}   Max tiles this run: {max_tiles if max_tiles is not None else 'all'}")
+    print(f"  Queued to run : {len(to_run)}")
+    print()
+    if to_run:
+        col_w = max(len(t) for t in to_run)
+        print(f"  {'Tile':<{col_w}}  {'Last status':<12}  {'Last run':<19}  {'Last start':<12}  Last end")
+        print(f"  {'-'*col_w}  {'-'*12}  {'-'*19}  {'-'*12}  {'-'*12}")
+        for tile in to_run:
+            entry = log.get(tile)
+            last_status = entry.get("status", "—") if entry else "never"
+            last_run = entry.get("start_time", "—") if entry else "—"
+            last_start = entry.get("ndvi_start_date", "—") if entry else "—"
+            last_end = entry.get("ndvi_end_date", "—") if entry else "—"
+            print(f"  {tile:<{col_w}}  {last_status:<12}  {last_run:<19}  {last_start:<12}  {last_end}")
+    print("=" * 64)
+    print()
+    # ─────────────────────────────────────────────────────────────────────────
 
     for tile in to_run:
         print(f"[BATCH] Processing tile: {tile}")
@@ -761,10 +791,12 @@ def main():
             "status": status,
             "start_time": start_time,
             "end_time": datetime.now().isoformat(),
+            "ndvi_start_date": getattr(args_tile, "start_date", ""),
+            "ndvi_end_date": getattr(args_tile, "end_date", "") or "",
             "error": error,
         }
         with open(log_path, "w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=["tile", "status", "start_time", "end_time", "error"])
+            writer = csv.DictWriter(handle, fieldnames=["tile", "status", "start_time", "end_time", "ndvi_start_date", "ndvi_end_date", "error"])
             writer.writeheader()
             for row in log.values():
                 writer.writerow(row)
