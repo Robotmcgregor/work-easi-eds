@@ -1,56 +1,57 @@
+
 #!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import math
-from datetime import date as _date, datetime
+import re
 import subprocess
 import sys
+from datetime import date as _date, datetime
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
-from tasks.task01_inventory_s3 import inventory_existing_outputs
-from tasks.task02_build_scene_manifest import load_or_build_manifest
-from tasks.task03_process_scene_ndvi import process_scene_to_s3
-from lib.s3_io import s3_key_exists
-from lib.run_log import (
-    default_run_log_uri,
-    finish_run_row,
-    last_success_end_date,
-    load_run_log,
-    new_run_row,
-    save_run_log,
-)
 
-"""
-Example prompt:
-
-python /home/jovyan/work-easi-eds/scripts/easi-scripts/optimised_ndvi/scripts/ndvi_master_pipeline.py \
-  --tile p089r084 \
-  --s3-bucket dcceew-eds-data \
-  --s3-prefix "AROAZ6PFZYT4B4C7MNRHV:robotmcgregor/eds/optimised" \
-  --work-dir /home/jovyan/scratch/eds-work-optimised \
-  --cloud-max 40 \
-  --start-date 2013-01-01 \
-  --end-date 2026-22-17 \
-  --limit 1
-"""
 def parse_args():
     ap = argparse.ArgumentParser("Optimised NDVI pipeline (datacube-native, COG->S3)")
-
-    ap.add_argument("--tile", required=True, help="e.g. p089r084")
-
+    ap.add_argument(
+        "--run-all-tiles",
+        action="store_true",
+        help="Run the pipeline for all tiles in the shapefile (overrides --tile). Supports resume if interrupted.",
+    )
+    ap.add_argument(
+        "--all-tiles-log",
+        default="all_tiles_run_log.csv",
+        help="Path to the persistent log file for --run-all-tiles mode (CSV).",
+    )
+    ap.add_argument(
+        "--max-tiles",
+        type=int,
+        default=None,
+        help="In --run-all-tiles mode, only process the first N tiles (after offset). Useful for batching.",
+    )
+    ap.add_argument(
+        "--tile-offset",
+        type=int,
+        default=0,
+        help="In --run-all-tiles mode, skip the first OFFSET tiles (after resume logic). Useful for batching.",
+    )
+    ap.add_argument(
+        "--cleanup-work-dir",
+        action="store_true",
+        help="Delete the entire run folder in --work-dir after processing completes (use with caution!).",
+    )
+    ap.add_argument("--tile", required=False, help="e.g. p089r084")
     ap.add_argument("--s3-bucket", required=True, help="e.g. dcceew-eds-data")
     ap.add_argument("--s3-prefix", required=True, help="e.g. ARO...:robotmcgregor/eds/optimised")
-
     ap.add_argument("--work-dir", required=True, help="Local work dir (avoid /scratch if not permitted)")
-
-    ap.add_argument("--tile-shp", default="/home/jovyan/assets/eds_lsat_grid_min_max.shp",
-
-                    help="Tile grid shapefile used to derive bbox/geom for tile")
-
+    ap.add_argument(
+        "--tile-shp",
+        default="/home/jovyan/assets/eds_lsat_grid_min_max.shp",
+        help="Tile grid shapefile used to derive bbox/geom for tile",
+    )
     ap.add_argument(
         "--run-log-uri",
         default=None,
@@ -59,27 +60,34 @@ def parse_args():
             "If omitted, defaults to s3://<bucket>/<prefix>/runs/optimised_ndvi_runs.parquet"
         ),
     )
-
     ap.add_argument("--start-date", default=None, help="YYYY-MM-DD (optional)")
     ap.add_argument("--end-date", default=None, help="YYYY-MM-DD (optional)")
-
-    ap.add_argument("--products", nargs="+", default=["ga_ls8c_ard_3", "ga_ls9c_ard_3"],
-                    help="Datacube product names for LS8/LS9 ARD")
-
-    ap.add_argument("--cloud-max", type=float, default=40.0,
-                    help="Max cloud cover percent. Implemented as MIN CLEAR PCT = 100 - cloud_max (using oa_fmask==1)")
-
-    ap.add_argument("--target-epsg", type=int, default=0,
-                    help="Override output EPSG (e.g. 28352). If 0, derive GDA94 MGA zone EPSG:283xx from tile centroid.")
-
+    ap.add_argument(
+        "--products",
+        nargs="+",
+        default=["ga_ls8c_ard_3", "ga_ls9c_ard_3"],
+        help="Datacube product names for LS8/LS9 ARD",
+    )
+    ap.add_argument(
+        "--cloud-max",
+        type=float,
+        default=40.0,
+        help="Max cloud cover percent. Implemented as MIN CLEAR PCT = 100 - cloud_max (using oa_fmask==1)",
+    )
+    ap.add_argument(
+        "--target-epsg",
+        type=int,
+        default=0,
+        help="Override output EPSG (e.g. 28352). If 0, derive GDA94 MGA zone EPSG:283xx from tile centroid.",
+    )
     ap.add_argument("--resolution", type=float, default=30.0, help="Output pixel size in metres (default 30)")
-
-    ap.add_argument("--rebase", action="store_true",
-                    help="Overwrite existing outputs (NDVI and ffmask). Default: resume/skip if exists.")
-
+    ap.add_argument(
+        "--rebase",
+        action="store_true",
+        help="Overwrite existing outputs (NDVI and ffmask). Default: resume/skip if exists.",
+    )
     ap.add_argument("--limit", type=int, default=0, help="Process only first N scenes (0 = no limit)")
     ap.add_argument("--dry-run", action="store_true")
-
     ap.add_argument(
         "--lookback",
         type=int,
@@ -93,18 +101,13 @@ def parse_args():
     ap.add_argument(
         "--verbose",
         action="store_true",
-        help=(
-            "Verbose logging. When chaining to EDS (--run-eds-after), forwards --verbose to EDS."
-        ),
+        help="Verbose logging. When chaining to EDS (--run-eds-after), forwards --verbose to EDS.",
     )
     ap.add_argument(
         "--copy-to-home",
         action="store_true",
-        help=(
-            "When chaining to EDS (--run-eds-after), forwards --copy-to-home to EDS (copies outputs under /home/jovyan)."
-        ),
+        help="When chaining to EDS (--run-eds-after), forwards --copy-to-home to EDS (copies outputs under /home/jovyan).",
     )
-
     ap.add_argument(
         "--export-vectors-to-work-dir",
         action="store_true",
@@ -113,10 +116,7 @@ def parse_args():
             "(copies vector outputs to a simple folder under --work-dir for easy download)."
         ),
     )
-
-    # Dask chunking (keeps it cheap)
     ap.add_argument("--chunk", type=int, default=2048, help="Dask chunk size for x/y (default 2048)")
-
     ap.add_argument(
         "--run-eds-after",
         action="store_true",
@@ -135,10 +135,12 @@ def parse_args():
         ),
     )
 
-    return ap.parse_args()
-
-import re
-
+    args = ap.parse_args()
+    if not args.run_all_tiles and not args.tile:
+        ap.error("You must specify either --tile or --run-all-tiles.")
+    if args.run_all_tiles and args.tile:
+        ap.error("Do not specify --tile when using --run-all-tiles.")
+    return args
 
 def normalise_yyyymmdd(value) -> str:
     """Return an 8-digit YYYYMMDD string from common date representations.
@@ -223,6 +225,8 @@ def _select_effective_window(
         if eff_end < eff_start:
             raise RuntimeError(f"Invalid window: end({eff_end}) < start({eff_start})")
         return eff_start, eff_end
+
+    from lib.run_log import last_success_end_date
 
     last_end = last_success_end_date(run_log_df, tile)
     if not last_end:
@@ -479,41 +483,51 @@ def resolve_output_epsg(row, cli_target_epsg: int) -> int:
         f"product={getattr(row, 'product', 'unknown')}"
     )
 
-def main():
-    args = parse_args()
-    tile = args.tile.lower()
+def _format_batch_tile(value) -> str:
+    tile = str(value).strip().lower()
+    match = re.fullmatch(r"p?(\d{1,3})[r_\-]?(\d{1,3})", tile)
+    if match:
+        return f"p{int(match.group(1)):03d}r{int(match.group(2)):03d}"
+    return tile
 
+
+def run_single_tile(args) -> None:
+    from lib.run_log import (
+        default_run_log_uri,
+        finish_run_row,
+        load_run_log,
+        new_run_row,
+        save_run_log,
+    )
+    from lib.s3_io import s3_key_exists
+    from tasks.task01_inventory_s3 import inventory_existing_outputs
+    from tasks.task02_build_scene_manifest import load_or_build_manifest
+    from tasks.task03_process_scene_ndvi import process_scene_to_s3
+
+    tile = args.tile.lower()
     base_work_dir = Path(args.work_dir)
     work_dir = base_work_dir / tile
     work_dir.mkdir(parents=True, exist_ok=True)
-
     run_log_uri = args.run_log_uri or default_run_log_uri(args.s3_bucket, args.s3_prefix)
     run_log_cache_dir = work_dir / "run_logs"
 
-    # 1) inventory existing NDVI outputs (so resume is fast)
     existing = inventory_existing_outputs(
         bucket=args.s3_bucket,
         prefix=args.s3_prefix,
         tile=tile,
     )
     print(f"[INFO] Existing NDVI outputs found in S3: {len(existing)}")
-    # print("target epsg: ", target_epsg)
-    # import sys
-    # sys.exit("brek run test target manifest...")
 
-    # 2) build manifest (in-memory) from datacube
     manifest_df = load_or_build_manifest(
         tile=tile,
         tile_shp=args.tile_shp,
         products=args.products,
         cloud_max=args.cloud_max,
-        # Load full manifest for auto-window logic; we apply date filtering after.
         start_date=None,
         end_date=None,
         target_epsg=args.target_epsg,
     )
 
-    # Final output EPSG must be resolved AFTER manifest build.
     if args.target_epsg and int(args.target_epsg) > 0:
         manifest_df["target_epsg"] = int(args.target_epsg)
     else:
@@ -528,11 +542,9 @@ def main():
         print("[DEBUG] manifest cols:", list(manifest_df.columns))
         print(manifest_df.head(1).to_dict("records"))
 
-    # Compute normalised date string column used for window selection/filtering.
     manifest_df = manifest_df.copy()
     manifest_df["yyyymmdd"] = manifest_df["date"].apply(normalise_yyyymmdd)
 
-    # Load run log (best-effort). If missing, we treat as first run.
     try:
         run_log_df = load_run_log(run_log_uri, run_log_cache_dir)
     except Exception as e:
@@ -546,10 +558,8 @@ def main():
         cli_end=args.end_date,
         run_log_df=run_log_df,
     )
-
     print(f"[INFO] Effective window: {eff_start} -> {eff_end}")
 
-    # Build the EDS-style seasonal baseline (±2 months around the effective window), across lookback years.
     baseline_df = _build_seasonal_baseline_df(
         manifest_df=manifest_df,
         eff_start_yyyymmdd=eff_start,
@@ -557,23 +567,20 @@ def main():
         lookback_years=int(args.lookback),
         expand_months=2,
     )
-
     win_start = baseline_df.attrs.get("seasonal_window_start_yyyymmdd")
     win_end = baseline_df.attrs.get("seasonal_window_end_yyyymmdd")
+    win_start_mmdd = baseline_df.attrs.get("seasonal_window_start_mmdd")
+    win_end_mmdd = baseline_df.attrs.get("seasonal_window_end_mmdd")
     min_year = baseline_df.attrs.get("min_year")
     end_year = baseline_df.attrs.get("end_year")
-    print(f"[INFO] Seasonal window (expanded ±2 months): {win_start} -> {win_end}")
+    print(f"[INFO] Seasonal window (expanded +/-2 months): {win_start} -> {win_end}")
     print(f"[INFO] Baseline lookback years: {int(args.lookback)} (years {min_year}..{end_year})")
     print(f"[INFO] Manifest scenes in baseline window: {len(baseline_df)}")
-
-    # import sys
-    # sys.exit("Forced stop after manifest")
 
     if args.limit and args.limit > 0:
         baseline_df = baseline_df.head(args.limit).reset_index(drop=True)
         print(f"[INFO] Limit enabled: {len(baseline_df)} scenes")
 
-    # 3) run logging + process each scene
     run_row = new_run_row(
         tile=tile,
         start_yyyymmdd=eff_start,
@@ -582,15 +589,30 @@ def main():
         rebase=bool(args.rebase),
         s3_bucket=args.s3_bucket,
         s3_prefix=args.s3_prefix,
+        requested_start_yyyymmdd=_normalise_cli_date(args.start_date),
+        requested_end_yyyymmdd=_normalise_cli_date(args.end_date),
+        effective_start_yyyymmdd=eff_start,
+        effective_end_yyyymmdd=eff_end,
+        seasonal_window_start_yyyymmdd=str(win_start) if win_start else None,
+        seasonal_window_end_yyyymmdd=str(win_end) if win_end else None,
+        seasonal_window_start_mmdd=str(win_start_mmdd) if win_start_mmdd else None,
+        seasonal_window_end_mmdd=str(win_end_mmdd) if win_end_mmdd else None,
+        lookback_years=int(args.lookback),
+        cloud_max=float(args.cloud_max),
+        products=[str(p) for p in (args.products or [])],
+        target_epsg=int(args.target_epsg),
+        resolution=float(args.resolution),
+        chunk=int(args.chunk),
+        existing_outputs_at_start=int(len(existing)),
+        manifest_scenes_total=int(len(manifest_df)),
     )
     run_id = run_row["run_id"]
-
     scenes_total = int(len(baseline_df))
+    scenes_created = 0
     scenes_processed = 0
     scenes_skipped_existing = 0
     scenes_failed = 0
 
-    # Append "running" row immediately (best-effort)
     try:
         if run_log_df is None or run_log_df.empty:
             run_log_df = pd.DataFrame([run_row])
@@ -609,8 +631,6 @@ def main():
             product = str(row.product)
             platform = str(row.platform)
             target_epsg = resolve_output_epsg(row, args.target_epsg)
-
-            # output keys
             yyyymm = yyyymmdd[:6]
             out_dir = f"{args.s3_prefix}/tiles/{tile}/{yyyymmdd[:4]}/{yyyymm}"
             ndvi_key = f"{out_dir}/sl{platform[1:]}olre_{tile}_{yyyymmdd}_ga1-clr_e{target_epsg}.tif"
@@ -635,7 +655,7 @@ def main():
                 lat_min=float(row.lat_min),
                 lon_max=float(row.lon_max),
                 lat_max=float(row.lat_max),
-                target_epsg=int(row.target_epsg),
+                target_epsg=int(target_epsg),
                 cloud_max=float(args.cloud_max),
                 bucket=args.s3_bucket,
                 ndvi_key=ndvi_key,
@@ -645,16 +665,14 @@ def main():
                 rebase=bool(args.rebase),
                 dask_chunk=int(args.chunk),
             )
+            scenes_created += 1
             scenes_processed += 1
-
     except Exception as e:
         final_status = "failed"
         scenes_failed += 1
         error_message = str(e)
         raise
-
     finally:
-        # Update the run row in the log (best-effort)
         try:
             finished_row = finish_run_row(
                 run_row,
@@ -663,27 +681,28 @@ def main():
                 scenes_processed=scenes_processed,
                 scenes_skipped_existing=scenes_skipped_existing,
                 scenes_failed=scenes_failed,
+                scenes_created=scenes_created,
                 error_message=error_message,
             )
-
             if run_log_df is None or run_log_df.empty:
                 run_log_df = pd.DataFrame([finished_row])
             else:
-                # Replace the row with matching run_id.
-                m = run_log_df["run_id"].astype(str) == str(run_id)
-                if m.any():
-                    for k, v in finished_row.items():
-                        run_log_df.loc[m, k] = v
+                match = run_log_df["run_id"].astype(str) == str(run_id)
+                if match.any():
+                    for key, value in finished_row.items():
+                        run_log_df.loc[match, key] = value
                 else:
                     run_log_df = pd.concat([run_log_df, pd.DataFrame([finished_row])], ignore_index=True)
-
             save_run_log(run_log_df, run_log_uri, run_log_cache_dir)
         except Exception as e:
             print(f"[WARN] Could not finalize run log: {e}")
 
-
+    print(
+        "[INFO] NDVI run summary: "
+        f"created={scenes_created} skipped_existing={scenes_skipped_existing} "
+        f"failed={scenes_failed} total_in_window={scenes_total}"
+    )
     print("[DONE] NDVI pipeline finished.")
-
     if args.run_eds_after:
         if eff_start == eff_end:
             print(f"[INFO] Skipping EDS: window is a single date ({eff_start}).")
@@ -695,6 +714,120 @@ def main():
             eff_end_yyyymmdd=eff_end,
             base_work_dir=base_work_dir,
         )
+
+
+def main():
+    import csv
+    import traceback
+
+    args = parse_args()
+    if not args.run_all_tiles:
+        run_single_tile(args)
+        return
+
+    import geopandas as gpd
+
+    gdf = gpd.read_file(args.tile_shp)
+    path_col = None
+    row_col = None
+    tile_col = None
+    for column in gdf.columns:
+        lower = column.lower()
+        if lower in ("path", "wrs_path", "wrs2_path"):
+            path_col = column
+        elif lower in ("row", "wrs_row", "wrs2_row"):
+            row_col = column
+        elif lower in ("tile", "tile_id", "tileid", "name", "id"):
+            tile_col = column
+
+    all_tiles = []
+    if path_col and row_col:
+        for _, row in gdf.iterrows():
+            all_tiles.append(f"p{int(row[path_col]):03d}r{int(row[row_col]):03d}")
+    elif tile_col:
+        all_tiles = [_format_batch_tile(value) for value in gdf[tile_col].dropna().unique().tolist()]
+    else:
+        raise ValueError("Could not find tile ID or path/row columns in shapefile")
+
+    log_path = Path(args.all_tiles_log)
+    log = {}
+    if log_path.exists():
+        with open(log_path, "r", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                log[row["tile"]] = row
+
+    to_run = [tile for tile in all_tiles if tile not in log or log[tile].get("status") != "success"]
+    offset = args.tile_offset or 0
+    max_tiles = args.max_tiles
+    if offset > 0:
+        to_run = to_run[offset:]
+    if max_tiles is not None:
+        to_run = to_run[:max_tiles]
+    # ── Pre-run summary ──────────────────────────────────────────────────────
+    print()
+    print("=" * 64)
+    print("  NDVI BATCH RUN SUMMARY")
+    print("=" * 64)
+    print(f"  Shapefile     : {args.tile_shp}")
+    print(f"  S3 bucket     : s3://{args.s3_bucket}/{args.s3_prefix}")
+    print(f"  Work dir      : {args.work_dir}")
+    print(f"  Date range    : {args.start_date}  →  {getattr(args, 'end_date', 'auto')}")
+    print(f"  Cloud max     : {args.cloud_max}%")
+    print(f"  Chunk         : {args.chunk}")
+    print(f"  Run EDS after : {getattr(args, 'run_eds_after', False)}")
+    print(f"  Total tiles in shapefile : {len(all_tiles)}")
+    print(f"  Already done  : {len(all_tiles) - len([t for t in all_tiles if t not in log or log[t].get('status') != 'success'])}")
+    print(f"  Offset        : {offset}   Max tiles this run: {max_tiles if max_tiles is not None else 'all'}")
+    print(f"  Queued to run : {len(to_run)}")
+    print()
+    if to_run:
+        col_w = max(len(t) for t in to_run)
+        print(f"  {'Tile':<{col_w}}  {'Last status':<12}  {'Last run':<19}  {'Last start':<12}  Last end")
+        print(f"  {'-'*col_w}  {'-'*12}  {'-'*19}  {'-'*12}  {'-'*12}")
+        for tile in to_run:
+            entry = log.get(tile)
+            last_status = entry.get("status", "—") if entry else "never"
+            last_run = entry.get("start_time", "—") if entry else "—"
+            last_start = entry.get("ndvi_start_date", "—") if entry else "—"
+            last_end = entry.get("ndvi_end_date", "—") if entry else "—"
+            print(f"  {tile:<{col_w}}  {last_status:<12}  {last_run:<19}  {last_start:<12}  {last_end}")
+    print("=" * 64)
+    print()
+    # ─────────────────────────────────────────────────────────────────────────
+
+    for tile in to_run:
+        print(f"[BATCH] Processing tile: {tile}")
+        status = "unknown"
+        error = ""
+        start_time = datetime.now().isoformat()
+        try:
+            args_tile = argparse.Namespace(**vars(args))
+            args_tile.tile = tile
+            args_tile.run_all_tiles = False
+            run_single_tile(args_tile)
+            status = "success"
+        except Exception as e:
+            status = "failed"
+            error = f"{e}\n{traceback.format_exc()}"
+            print(f"[BATCH][ERROR] Tile {tile} failed: {e}")
+
+        log[tile] = {
+            "tile": tile,
+            "status": status,
+            "start_time": start_time,
+            "end_time": datetime.now().isoformat(),
+            "ndvi_start_date": getattr(args_tile, "start_date", ""),
+            "ndvi_end_date": getattr(args_tile, "end_date", "") or "",
+            "error": error,
+        }
+        with open(log_path, "w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["tile", "status", "start_time", "end_time", "ndvi_start_date", "ndvi_end_date", "error"])
+            writer.writeheader()
+            for row in log.values():
+                writer.writerow(row)
+
+    print(f"[BATCH] All tiles processed. Log written to {log_path}")
 
 
 if __name__ == "__main__":

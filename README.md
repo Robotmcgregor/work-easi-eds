@@ -173,3 +173,76 @@ Chaining details and what gets forwarded into EDS are documented in:
 - `scripts/easi-scripts/optimised_ndvi/docs/README.md`
 - `scripts/easi-scripts/optimised_processing/scripts/docs/`
 - `scripts/easi-scripts/optimised_processing/scripts/docs/README.md`
+
+## Batch/Chunked Orchestration (All Tiles, Batching, Resume)
+
+Both the NDVI and EDS pipelines support robust batch processing over all tiles in a shapefile, with chunking and resume support:
+
+### Run NDVI and EDS for the first 10 tiles, starting from 2026-01-01
+
+```bash
+python scripts/easi-scripts/optimised_ndvi/scripts/ndvi_master_pipeline.py \
+  --run-all-tiles \
+  --tile-shp /home/jovyan/assets/eds_lsat_grid_min_max.shp \
+  --s3-bucket <bucket> \
+  --s3-prefix <prefix> \
+  --work-dir <local-work-dir> \
+  --max-tiles 10 \
+  --start-date 2026-01-01 \
+  --run-eds-after
+```
+
+- `--max-tiles 10` processes only the first 10 tiles.
+- `--start-date 2026-01-01` sets the default window for new tiles.
+- `--run-eds-after` will automatically run EDS for each tile after NDVI completes.
+
+### Run EDS only (if running EDS separately)
+
+```bash
+python scripts/easi-scripts/optimised_processing/scripts/eds_master_pipeline_optimised.py \
+  --run-all-tiles \
+  --tile-shp /home/jovyan/assets/eds_lsat_grid_min_max.shp \
+  --s3-bucket <bucket> \
+  --s3-prefix <prefix> \
+  --work-dir <local-work-dir> \
+  --max-tiles 10 \
+  --start-date 2026-01-01
+```
+
+- The pipeline will resume incomplete tiles using the CSV log.
+- Combine with `--tile-offset` to split work into manageable chunks.
+- The persistent CSV log ensures failed tiles can be retried without reprocessing successful ones.
+
+### Notes
+- If there is no previous run for a tile, the pipeline uses the earliest available scene (or your `--start-date`) as the window start.
+- To force a specific default start date for all tiles, always provide `--start-date`.
+- If you want to process a different chunk, use `--tile-offset` and `--max-tiles` together.
+
+See the NDVI and EDS pipeline docs for more details and advanced options.
+
+### Running in the Background with nohup
+
+To run the batch process in the background and capture all output to a log file, use `nohup`:
+
+```bash
+nohup python scripts/easi-scripts/optimised_ndvi/scripts/ndvi_master_pipeline.py \
+  --run-all-tiles \
+  --tile-shp /home/jovyan/assets/eds_lsat_grid_min_max.shp \
+  --s3-bucket <bucket> \
+  --s3-prefix <prefix> \
+  --work-dir <local-work-dir> \
+  --max-tiles 10 \
+  --start-date 2026-01-01 \
+  --run-eds-after > my_batch_run.log 2>&1 &
+```
+
+- This will process the first 10 tiles sequentially, running NDVI and then EDS for each tile.
+- All output (including errors) will be written to `my_batch_run.log`.
+- You can safely disconnect from your session; the process will continue running in the background.
+- To check progress, use `tail -f my_batch_run.log`.
+- To stop the process, use `kill <pid>` (find the PID with `ps` or `jobs -l`).
+
+**Note:**
+- Each tile is processed one after the other (not in parallel).
+- The persistent CSV log ensures that failed or incomplete tiles can be retried by rerunning the same command.
+- You can adjust `--max-tiles` and `--tile-offset` to process different chunks in separate background jobs if needed.

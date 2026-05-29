@@ -10,6 +10,6 @@ def inventory_existing_outputs(bucket: str, prefix: str, tile: str) -> List[str]
     """
     base = f"{prefix}/tiles/{tile}/ndvi/"
     keys = list_s3_keys(bucket=bucket, prefix=base)
-    # keep only ndvi outputs (optional)
+    # keep only ndvi outputs
     return [k for k in keys if "_ndvi_" in k and k.endswith(".tif")]
 

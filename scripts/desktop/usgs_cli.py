@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.eds_cli import (
+from scripts.desktop.eds_cli import (
     cmd_usgs_login,
     cmd_usgs_search,
     cmd_usgs_download,
