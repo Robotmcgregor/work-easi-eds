@@ -569,6 +569,8 @@ def run_single_tile(args) -> None:
     )
     win_start = baseline_df.attrs.get("seasonal_window_start_yyyymmdd")
     win_end = baseline_df.attrs.get("seasonal_window_end_yyyymmdd")
+    win_start_mmdd = baseline_df.attrs.get("seasonal_window_start_mmdd")
+    win_end_mmdd = baseline_df.attrs.get("seasonal_window_end_mmdd")
     min_year = baseline_df.attrs.get("min_year")
     end_year = baseline_df.attrs.get("end_year")
     print(f"[INFO] Seasonal window (expanded +/-2 months): {win_start} -> {win_end}")
@@ -587,9 +589,26 @@ def run_single_tile(args) -> None:
         rebase=bool(args.rebase),
         s3_bucket=args.s3_bucket,
         s3_prefix=args.s3_prefix,
+        requested_start_yyyymmdd=_normalise_cli_date(args.start_date),
+        requested_end_yyyymmdd=_normalise_cli_date(args.end_date),
+        effective_start_yyyymmdd=eff_start,
+        effective_end_yyyymmdd=eff_end,
+        seasonal_window_start_yyyymmdd=str(win_start) if win_start else None,
+        seasonal_window_end_yyyymmdd=str(win_end) if win_end else None,
+        seasonal_window_start_mmdd=str(win_start_mmdd) if win_start_mmdd else None,
+        seasonal_window_end_mmdd=str(win_end_mmdd) if win_end_mmdd else None,
+        lookback_years=int(args.lookback),
+        cloud_max=float(args.cloud_max),
+        products=[str(p) for p in (args.products or [])],
+        target_epsg=int(args.target_epsg),
+        resolution=float(args.resolution),
+        chunk=int(args.chunk),
+        existing_outputs_at_start=int(len(existing)),
+        manifest_scenes_total=int(len(manifest_df)),
     )
     run_id = run_row["run_id"]
     scenes_total = int(len(baseline_df))
+    scenes_created = 0
     scenes_processed = 0
     scenes_skipped_existing = 0
     scenes_failed = 0
@@ -646,6 +665,7 @@ def run_single_tile(args) -> None:
                 rebase=bool(args.rebase),
                 dask_chunk=int(args.chunk),
             )
+            scenes_created += 1
             scenes_processed += 1
     except Exception as e:
         final_status = "failed"
@@ -661,6 +681,7 @@ def run_single_tile(args) -> None:
                 scenes_processed=scenes_processed,
                 scenes_skipped_existing=scenes_skipped_existing,
                 scenes_failed=scenes_failed,
+                scenes_created=scenes_created,
                 error_message=error_message,
             )
             if run_log_df is None or run_log_df.empty:
@@ -676,6 +697,11 @@ def run_single_tile(args) -> None:
         except Exception as e:
             print(f"[WARN] Could not finalize run log: {e}")
 
+    print(
+        "[INFO] NDVI run summary: "
+        f"created={scenes_created} skipped_existing={scenes_skipped_existing} "
+        f"failed={scenes_failed} total_in_window={scenes_total}"
+    )
     print("[DONE] NDVI pipeline finished.")
     if args.run_eds_after:
         if eff_start == eff_end:
